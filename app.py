@@ -4,7 +4,7 @@ Sistema profesional de optimización de portafolios de apuestas deportivas
 Combina Inferencia Bayesiana Gamma-Poisson, Teoría de la Información y Criterio de Kelly
 Con cobertura S73 completa (2 errores) y gestión probabilística avanzada
 
-CORRECIONES IMPLEMENTADAS v2.1:
+CORRECCIONES IMPLEMENTADAS v2.1:
 1. ✅ Corrección total de errores de tipado en gráficos Plotly (paleta RISK_PALETTE)
 2. ✅ Restauración funcional del modo manual de inputs con toggle auto/manual
 3. ✅ Validación institucional del sistema S73 reducido con umbrales probabilísticos
@@ -153,17 +153,24 @@ class MatchInputLayer:
         """
         st.header("⚽ Input Manual de Partidos Reales")
         
-        # Selector de modo
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("🎯 Modo de Operación")
-            mode = st.radio(
-                "Selecciona el modo de análisis:",
-                ["🔘 Modo Automático", "🎮 Modo Manual"],
-                horizontal=True
-            )
+        # Selector de modo - CORREGIDO
+        st.subheader("🎯 Modo de Operación")
+        
+        # Usar selectbox para mayor claridad
+        mode = st.selectbox(
+            "Selecciona el modo de análisis:",
+            ["🔘 Modo Automático", "🎮 Modo Manual"],
+            index=0,  # Por defecto automático
+            key="mode_selector"
+        )
         
         is_manual_mode = mode == "🎮 Modo Manual"
+        
+        # Mostrar indicador claro del modo actual
+        if is_manual_mode:
+            st.success("✅ **MODO MANUAL ACTIVADO** - Puedes ajustar todas las fuerzas manualmente")
+        else:
+            st.info("🔘 **MODO AUTOMÁTICO** - Las fuerzas se estiman automáticamente")
         
         # Contenedor principal de input
         matches_data = []
@@ -225,43 +232,48 @@ class MatchInputLayer:
                 )
             
             with col_c:
+                # ===== CORRECCIÓN CRÍTICA: Lógica condicional corregida =====
                 if is_manual_mode:
-                    # Expander para parámetros avanzados
-                    with st.expander("⚙️ Ajustes Avanzados", expanded=False):
+                    # Mostrar controles avanzados expandidos por defecto en modo manual
+                    with st.expander("⚙️ Ajustes Avanzados", expanded=True):  # Cambiado a True
                         st.markdown("**Fuerzas Relativas (default ≈ 1.0)**")
                         
-                        # Sliders para fuerzas
+                        # Sliders para fuerzas con valores más realistas
                         home_attack = st.slider(
                             f"Ataque {home_team}",
                             min_value=0.5,
                             max_value=2.0,
                             value=SystemConfig.DEFAULT_ATTACK_MEAN,
-                            step=0.1,
-                            key=f"ha_{match_idx}"
+                            step=0.05,  # Paso más fino
+                            key=f"ha_{match_idx}",
+                            help="Fuerza de ataque del equipo local (1.0 = promedio)"
                         )
                         home_defense = st.slider(
                             f"Defensa {home_team}",
                             min_value=0.5,
                             max_value=2.0,
                             value=SystemConfig.DEFAULT_DEFENSE_MEAN,
-                            step=0.1,
-                            key=f"hd_{match_idx}"
+                            step=0.05,
+                            key=f"hd_{match_idx}",
+                            help="Fuerza defensiva del equipo local (1.0 = promedio)"
                         )
                         away_attack = st.slider(
                             f"Ataque {away_team}",
                             min_value=0.5,
                             max_value=2.0,
                             value=SystemConfig.DEFAULT_ATTACK_MEAN,
-                            step=0.1,
-                            key=f"aa_{match_idx}"
+                            step=0.05,
+                            key=f"aa_{match_idx}",
+                            help="Fuerza de ataque del equipo visitante (1.0 = promedio)"
                         )
                         away_defense = st.slider(
                             f"Defensa {away_team}",
                             min_value=0.5,
                             max_value=2.0,
                             value=SystemConfig.DEFAULT_DEFENSE_MEAN,
-                            step=0.1,
-                            key=f"ad_{match_idx}"
+                            step=0.05,
+                            key=f"ad_{match_idx}",
+                            help="Fuerza defensiva del equipo visitante (1.0 = promedio)"
                         )
                         home_advantage = st.slider(
                             f"Ventaja Local",
@@ -269,22 +281,24 @@ class MatchInputLayer:
                             max_value=1.5,
                             value=SystemConfig.DEFAULT_HOME_ADVANTAGE,
                             step=0.01,
-                            key=f"adv_{match_idx}"
+                            key=f"adv_{match_idx}",
+                            help="Factor de ventaja por jugar en casa (típico: 1.1-1.2)"
                         )
                 else:
-                    # Valores por defecto para modo automático
+                    # Valores por defecto para modo automático - NO mostrar controles
                     home_attack = SystemConfig.DEFAULT_ATTACK_MEAN
                     home_defense = SystemConfig.DEFAULT_DEFENSE_MEAN
                     away_attack = SystemConfig.DEFAULT_ATTACK_MEAN
                     away_defense = SystemConfig.DEFAULT_DEFENSE_MEAN
                     home_advantage = SystemConfig.DEFAULT_HOME_ADVANTAGE
                     
+                    # Solo mostrar información, no controles
                     st.info(
-                        "🔘 **Modo Automático**\n\n"
-                        "Fuerzas estimadas automáticamente:\n"
-                        f"- Ataque: {home_attack:.1f} / {away_attack:.1f}\n"
-                        f"- Defensa: {home_defense:.1f} / {away_defense:.1f}\n"
-                        f"- Ventaja local: {home_advantage:.1f}"
+                        f"🔘 **Modo Automático - Partido {match_idx}**\n\n"
+                        f"Fuerzas estimadas automáticamente:\n"
+                        f"- **{home_team}**: Ataque={home_attack:.1f}, Defensa={home_defense:.1f}\n"
+                        f"- **{away_team}**: Ataque={away_attack:.1f}, Defensa={away_defense:.1f}\n"
+                        f"- **Ventaja local**: {home_advantage:.2f}x"
                     )
             
             # Calcular margen implícito
@@ -486,7 +500,7 @@ class ACBEModel:
         lambda_away_samples = np.random.gamma(
             shape=alpha_posterior,
             scale=1/beta_posterior,
-            size=(SystemConfig.MONTE_CARLO_ITERATIONS, n_matches)
+            size=(SystemConfig.MONTE_CARLO_ITERations, n_matches)
         ).mean(axis=0)
         
         return lambda_home_samples, lambda_away_samples
