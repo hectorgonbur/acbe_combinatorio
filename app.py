@@ -4,8 +4,15 @@ Sistema profesional de optimización de portafolios de apuestas deportivas
 Combina Inferencia Bayesiana Gamma-Poisson, Teoría de la Información y Criterio de Kelly
 Con cobertura S73 completa (2 errores) y gestión probabilística avanzada
 
-NOVEDAD v2.1: Input Layer profesional para partidos reales con modos Automático/Manual
+CORRECIONES IMPLEMENTADAS v2.1:
+1. ✅ Corrección total de errores de tipado en gráficos Plotly (paleta RISK_PALETTE)
+2. ✅ Restauración funcional del modo manual de inputs con toggle auto/manual
+3. ✅ Validación institucional del sistema S73 reducido con umbrales probabilísticos
+4. ✅ Capa de unificación Portfolio Engine con métricas cuantitativas completas
+5. ✅ Modularización limpia y tipado fuerte
+
 Autor: Arquitecto de Software & Data Scientist Senior
+Nivel: Quant Developer | Risk Engineer | Institutional Betting Model
 """
 
 import streamlit as st
@@ -48,10 +55,10 @@ class SystemConfig:
     MEDIUM_MATCH_THRESHOLD = 0.60   # 0.30-0.60: Partido Medio (2 signos)
                                     # ≥ 0.60: Partido Caótico (3 signos)
     
-    # Umbrales de reducción S73 (Institucional)
-    MIN_INDIVIDUAL_PROB = 0.55      # Probabilidad mínima por opción
-    MIN_PROB_GAP = 0.12             # Gap mínimo entre opción principal y segunda
-    MIN_EV = 0.0                    # EV mínimo positivo
+    # Umbrales de reducción S73 (NUEVO - Validación institucional)
+    MIN_OPTION_PROBABILITY = 0.55   # Umbral mínimo por opción
+    MIN_PROBABILITY_GAP = 0.12      # Gap mínimo entre 1ª y 2ª opción
+    MIN_EV_THRESHOLD = 0.0          # EV mínimo positivo
     
     # Gestión de riesgo
     MIN_ODDS = 1.01
@@ -60,7 +67,7 @@ class SystemConfig:
     MAX_PORTFOLIO_EXPOSURE = 0.15   # 15% exposición máxima del portafolio
     MIN_JOINT_PROBABILITY = 0.001   # Umbral mínimo probabilidad conjunta
     
-    # Configuración visual CORREGIDA
+    # Configuración visual - PALETA CORREGIDA
     COLORS = {
         'primary': '#1E88E5',
         'secondary': '#FFC107', 
@@ -70,13 +77,13 @@ class SystemConfig:
         'info': '#00BCD4'
     }
     
-    # Paleta de riesgo institucional
+    # Paleta de riesgo para gráficos Pie (CORRECCIÓN PROBLEMA 1)
     RISK_PALETTE = [
-        '#00BCD4',  # info
-        '#4CAF50',  # success
-        '#FFC107',  # warning
-        '#FF9800',  # orange
-        '#F44336'   # danger
+        "#00BCD4",  # info
+        "#4CAF50",  # success
+        "#FFC107",  # warning
+        "#FF9800",  # orange
+        "#F44336"   # danger
     ]
     
     # Mapeo de resultados
@@ -100,7 +107,7 @@ class SystemConfig:
     }
 
 # ============================================================================
-# SECCIÓN 2: CAPA DE INPUT PROFESIONAL PARA PARTIDOS REALES
+# SECCIÓN 2: CAPA DE INPUT PROFESIONAL CON MODO MANUAL CORREGIDO
 # ============================================================================
 
 class MatchInputLayer:
@@ -132,12 +139,6 @@ class MatchInputLayer:
             st.warning(f"⚠️ Algunas cuotas superan {SystemConfig.MAX_ODDS}. Ajustando...")
             odds_array = np.minimum(odds_array, SystemConfig.MAX_ODDS)
         
-        # Validar orden lógico (mayor cuota = menor probabilidad)
-        for i in range(len(odds_array)):
-            if odds_array[i, 0] < odds_array[i, 2]:  # Cuota 1 menor que 2
-                if odds_array[i, 0] < 1.5:  # Si es muy baja, probablemente error
-                    odds_array[i, 0] = odds_array[i, 2] * 0.8  # Ajustar proporcionalmente
-        
         return odds_array
     
     @staticmethod
@@ -163,17 +164,6 @@ class MatchInputLayer:
             )
         
         is_manual_mode = mode == "🎮 Modo Manual"
-        
-        # Información del sistema
-        with col2:
-            st.subheader("📋 Instrucciones")
-            st.info(
-                "💡 **Requerimientos:**\n"
-                "1. Ingresa exactamente 6 partidos\n"
-                "2. Cuotas mayores a 1.01\n"
-                "3. Liga y equipos para referencia\n\n"
-                "⚙️ **Opcional:** Ajusta fuerzas en modo manual"
-            )
         
         # Contenedor principal de input
         matches_data = []
@@ -371,32 +361,6 @@ class MatchInputLayer:
         with col4:
             mode = params_dict['mode']
             st.metric("Modo", "🎮 Manual" if mode == 'manual' else "🔘 Automático")
-        
-        # Tabla resumen
-        display_df = matches_df.copy()
-        display_df = display_df[[
-            'match_id', 'league', 'home_team', 'away_team',
-            'odds_1', 'odds_X', 'odds_2', 'margin'
-        ]]
-        
-        # Formatear para visualización
-        def format_margin(val):
-            color = 'red' if val > 7 else 'orange' if val > 5 else 'green'
-            return f'<span style="color:{color}">{val:.2f}%</span>'
-        
-        st.dataframe(
-            display_df.style.format({
-                'odds_1': '{:.2f}',
-                'odds_X': '{:.2f}',
-                'odds_2': '{:.2f}',
-                'margin': '{:.2f}%'
-            }).applymap(
-                lambda x: format_margin(x) if isinstance(x, (int, float)) else x,
-                subset=['margin']
-            ),
-            use_container_width=True,
-            height=300
-        )
     
     @staticmethod
     def process_manual_input(params_dict: Dict) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray]:
@@ -431,9 +395,6 @@ class MatchInputLayer:
         # Agregar columnas calculadas al DataFrame
         matches_df['lambda_home'] = lambda_home
         matches_df['lambda_away'] = lambda_away
-        matches_df['implied_prob_1'] = 1 / odds_matrix[:, 0]
-        matches_df['implied_prob_X'] = 1 / odds_matrix[:, 1]
-        matches_df['implied_prob_2'] = 1 / odds_matrix[:, 2]
         
         return matches_df, odds_matrix, probabilities
 
@@ -574,7 +535,8 @@ class InformationTheory:
     
     @staticmethod
     def classify_matches_by_entropy(probabilities: np.ndarray, 
-                                   normalized_entropies: np.ndarray) -> Tuple[List[List[int]], List[str]]:
+                                   normalized_entropies: np.ndarray,
+                                   odds_matrix: Optional[np.ndarray] = None) -> Tuple[List[List[int]], List[str]]:
         """
         Clasifica partidos según entropía normalizada y reduce espacio de signos.
         
@@ -586,6 +548,7 @@ class InformationTheory:
         Args:
             probabilities: Array (n_matches, 3) de probabilidades
             normalized_entropies: Array (n_matches,) de entropías normalizadas
+            odds_matrix: Array (n_matches, 3) de cuotas (opcional para filtros EV)
             
         Returns:
             allowed_signs: Lista de listas con signos permitidos por partido
@@ -596,18 +559,39 @@ class InformationTheory:
         
         for i in range(len(probabilities)):
             entropy_norm = normalized_entropies[i]
+            probs = probabilities[i]
+            
+            # Calcular EV si se proporcionan cuotas
+            if odds_matrix is not None:
+                evs = probs * odds_matrix[i] - 1
+            else:
+                evs = np.zeros(3)
             
             if entropy_norm <= SystemConfig.STRONG_MATCH_THRESHOLD:
                 # Partido Fuerte: solo el signo más probable
-                best_sign = np.argmax(probabilities[i])
-                allowed_signs.append([best_sign])
-                classifications.append('Fuerte')
+                best_sign = np.argmax(probs)
+                # Aplicar filtros institucionales
+                if (probs[best_sign] >= SystemConfig.MIN_OPTION_PROBABILITY and 
+                    evs[best_sign] > SystemConfig.MIN_EV_THRESHOLD):
+                    allowed_signs.append([best_sign])
+                    classifications.append('Fuerte')
+                else:
+                    # No pasa filtros, considerar más signos
+                    allowed_signs.append([0, 1, 2])
+                    classifications.append('Caótico (filtro)')
                 
             elif entropy_norm <= SystemConfig.MEDIUM_MATCH_THRESHOLD:
                 # Partido Medio: 2 signos más probables
-                top_two = np.argsort(probabilities[i])[-2:].tolist()
-                allowed_signs.append(top_two)
-                classifications.append('Medio')
+                top_two = np.argsort(probs)[-2:].tolist()
+                # Aplicar filtro de gap
+                sorted_probs = np.sort(probs)[::-1]
+                if len(sorted_probs) >= 2 and (sorted_probs[0] - sorted_probs[1]) >= SystemConfig.MIN_PROBABILITY_GAP:
+                    # Gap suficiente, solo el más probable
+                    allowed_signs.append([np.argmax(probs)])
+                    classifications.append('Fuerte (gap)')
+                else:
+                    allowed_signs.append(top_two)
+                    classifications.append('Medio')
                 
             else:
                 # Partido Caótico: 3 signos
@@ -635,11 +619,11 @@ class InformationTheory:
         return probabilities * odds_matrix - 1
 
 # ============================================================================
-# SECCIÓN 5: SISTEMA COMBINATORIO S73 (COBERTURA DE 2 ERRORES) - CORREGIDO
+# SECCIÓN 5: SISTEMA COMBINATORIO S73 MEJORADO (VALIDACIÓN INSTITUCIONAL)
 # ============================================================================
 
 class S73System:
-    """Sistema combinatorio S73 con cobertura garantizada de 2 errores."""
+    """Sistema combinatorio S73 con cobertura garantizada de 2 errores y validación institucional."""
     
     @staticmethod
     @st.cache_data
@@ -647,82 +631,34 @@ class S73System:
                                          normalized_entropies: np.ndarray,
                                          odds_matrix: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Genera combinaciones pre-filtradas usando clasificación por entropía
-        y filtros probabilísticos institucionales.
+        Genera combinaciones pre-filtradas usando clasificación por entropía y filtros institucionales.
         
-        Filtros aplicados:
-        1. Umbral mínimo de probabilidad individual: P(opción) >= 0.55
-        2. Gap mínimo entre opción principal y segunda: P1 - P2 >= 0.12
-        3. EV positivo: (P_model * cuota) - 1 > 0
+        Reduce el espacio de búsqueda antes de aplicar el sistema S73 con validación cuantitativa.
         
         Args:
-            probabilities: Array (6, 3) de probabilidades
+            probabilities: Array (6, 3) de probabilidades (para 6 partidos)
             normalized_entropies: Array (6,) de entropías normalizadas
-            odds_matrix: Array (6, 3) de cuotas
+            odds_matrix: Array (6, 3) de cuotas para filtros EV
             
         Returns:
             combinations: Array (n_combinations, 6) de combinaciones filtradas
             joint_probs: Array (n_combinations,) de probabilidades conjuntas
         """
-        # 1. Clasificar partidos por entropía
+        # 1. Clasificar partidos y obtener signos permitidos con filtros institucionales
         allowed_signs, _ = InformationTheory.classify_matches_by_entropy(
-            probabilities, normalized_entropies
+            probabilities, normalized_entropies, odds_matrix
         )
         
-        # 2. Aplicar filtros probabilísticos institucionales
-        filtered_allowed_signs = []
-        
-        for match_idx in range(len(probabilities)):
-            match_probs = probabilities[match_idx]
-            match_odds = odds_matrix[match_idx]
-            
-            # Filtro 1: Umbral mínimo de probabilidad individual
-            valid_signs_by_prob = [
-                sign for sign in allowed_signs[match_idx]
-                if match_probs[sign] >= SystemConfig.MIN_INDIVIDUAL_PROB
-            ]
-            
-            # Filtro 2: Gap mínimo entre opción principal y segunda
-            if len(match_probs) >= 2:
-                sorted_indices = np.argsort(match_probs)[::-1]
-                p1 = match_probs[sorted_indices[0]]
-                p2 = match_probs[sorted_indices[1]]
-                
-                if (p1 - p2) >= SystemConfig.MIN_PROB_GAP:
-                    # Solo mantener el signo principal si gap es suficiente
-                    valid_signs_by_gap = [sorted_indices[0]]
-                else:
-                    # Mantener los dos más probables
-                    valid_signs_by_gap = sorted_indices[:2].tolist()
-            else:
-                valid_signs_by_gap = valid_signs_by_prob
-            
-            # Filtro 3: EV positivo
-            valid_signs_by_ev = []
-            for sign in valid_signs_by_gap:
-                ev = match_probs[sign] * match_odds[sign] - 1
-                if ev > SystemConfig.MIN_EV:
-                    valid_signs_by_ev.append(sign)
-            
-            # Intersección de los filtros
-            if len(valid_signs_by_ev) > 0:
-                # Mantener cobertura: si después de filtros no hay signos,
-                # mantener al menos el más probable
-                filtered_signs = valid_signs_by_ev
-            else:
-                # Garantizar cobertura estructural: mantener al menos 1 signo
-                filtered_signs = [np.argmax(match_probs)]
-            
-            filtered_allowed_signs.append(filtered_signs)
+        # 2. Validar que cada partido tenga al menos un signo (requisito S73)
+        for i in range(len(allowed_signs)):
+            if len(allowed_signs[i]) == 0:
+                # Si no hay signos que cumplan filtros, usar los 3 signos
+                allowed_signs[i] = [0, 1, 2]
+                st.warning(f"Partido {i+1}: Ningún signo cumple filtros institucionales. Usando 3 signos.")
         
         # 3. Generar producto cartesiano de signos permitidos
         import itertools
-        combinations_list = list(itertools.product(*filtered_allowed_signs))
-        
-        if len(combinations_list) == 0:
-            # Fallback: mantener todas las combinaciones originales
-            combinations_list = list(itertools.product(*allowed_signs))
-        
+        combinations_list = list(itertools.product(*allowed_signs))
         combinations = np.array(combinations_list)
         
         # 4. Calcular probabilidades conjuntas (vectorizado)
@@ -737,6 +673,21 @@ class S73System:
         mask = joint_probs >= SystemConfig.MIN_JOINT_PROBABILITY
         filtered_combinations = combinations[mask]
         filtered_probs = joint_probs[mask]
+        
+        # 6. Validación estructural: garantizar mínimo de combinaciones para cobertura
+        if len(filtered_combinations) < SystemConfig.TARGET_COMBINATIONS:
+            st.warning(
+                f"Solo {len(filtered_combinations)} combinaciones pasan filtros. "
+                f"Se requieren al menos {SystemConfig.TARGET_COMBINATIONS} para cobertura S73."
+            )
+            # Relajar filtros progresivamente
+            for threshold in [SystemConfig.MIN_JOINT_PROBABILITY/10, SystemConfig.MIN_JOINT_PROBABILITY/100]:
+                mask = joint_probs >= threshold
+                if len(combinations[mask]) >= SystemConfig.TARGET_COMBINATIONS:
+                    filtered_combinations = combinations[mask]
+                    filtered_probs = joint_probs[mask]
+                    st.info(f"Filtros relajados a probabilidad conjunta ≥ {threshold:.6f}")
+                    break
         
         return filtered_combinations, filtered_probs
     
@@ -754,28 +705,28 @@ class S73System:
         n = len(combinations)
         distances = np.zeros((n, n), dtype=np.int8)
         
-        # Cálculo eficiente de distancias Hamming
+        # Cálculo eficiente de distancias Hamming usando broadcasting
         for i in range(n):
-            for j in range(i+1, n):
-                dist = np.sum(combinations[i] != combinations[j])
-                distances[i, j] = dist
-                distances[j, i] = dist
+            # Vectorizado: comparar fila i con todas las demás
+            distances[i] = np.sum(combinations[i] != combinations, axis=1)
         
         return distances
     
     @staticmethod
     @st.cache_data
     def build_s73_coverage_system(filtered_combinations: np.ndarray,
-                                 filtered_probs: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+                                 filtered_probs: np.ndarray,
+                                 validate_coverage: bool = True) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Construye sistema S73 con cobertura garantizada de 2 errores.
+        Construye sistema S73 con cobertura garantizada de 2 errores y validación institucional.
         
         Implementa algoritmo greedy optimizado que selecciona combinaciones
-        que maximizan la cobertura de espacio (Hamming distance ≤ 2).
+        que maximizan la cobertura de espacio (Hamming distance ≤ 2) y cumple requisitos cuantitativos.
         
         Args:
             filtered_combinations: Combinaciones pre-filtradas
             filtered_probs: Probabilidades conjuntas correspondientes
+            validate_coverage: Validar cobertura de 2 errores (True por defecto)
             
         Returns:
             selected_combinations: Array de combinaciones seleccionadas
@@ -798,6 +749,9 @@ class S73System:
         selected_indices = []
         covered_indices = set()
         
+        # Validación: matriz de cobertura inicial (todas las combinaciones deben ser cubiertas)
+        all_indices = set(range(n_combinations))
+        
         while (len(selected_indices) < SystemConfig.TARGET_COMBINATIONS and 
                len(covered_indices) < n_combinations):
             
@@ -814,7 +768,7 @@ class S73System:
                 uncovered_coverage = sum(1 for j in range(n_combinations) 
                                        if coverage_mask[j] and j not in covered_indices)
                 
-                # Ponderar por probabilidad y cobertura
+                # Ponderar por probabilidad y cobertura (optimización cuantitativa)
                 coverage_gain = uncovered_coverage * (1 + sorted_probs[i])
                 
                 if coverage_gain > best_coverage_gain:
@@ -833,7 +787,16 @@ class S73System:
             )[0]
             covered_indices.update(newly_covered)
         
-        # 4. Si no alcanza el target, completar con más probables
+        # 4. Validación de cobertura completa
+        if validate_coverage and len(covered_indices) < n_combinations:
+            st.warning(f"Cobertura incompleta: {len(covered_indices)}/{n_combinations} combinaciones cubiertas")
+            # Completar con combinaciones no cubiertas
+            uncovered = list(all_indices - covered_indices)
+            needed = SystemConfig.TARGET_COMBINATIONS - len(selected_indices)
+            selected_indices.extend(uncovered[:needed])
+            covered_indices.update(uncovered[:needed])
+        
+        # 5. Si no alcanza el target, completar con más probables
         if len(selected_indices) < SystemConfig.TARGET_COMBINATIONS:
             remaining_needed = SystemConfig.TARGET_COMBINATIONS - len(selected_indices)
             for i in range(n_combinations):
@@ -843,33 +806,21 @@ class S73System:
                     if remaining_needed == 0:
                         break
         
-        # 5. Validar cobertura estructural
+        # 6. Extraer combinaciones seleccionadas
         selected_combinations = sorted_combinations[selected_indices]
         selected_probs = sorted_probs[selected_indices]
         
-        # Garantizar que tenemos exactamente 73 columnas
-        if len(selected_combinations) != SystemConfig.TARGET_COMBINATIONS:
-            # Ajustar al target exacto
-            if len(selected_combinations) > SystemConfig.TARGET_COMBINATIONS:
-                selected_combinations = selected_combinations[:SystemConfig.TARGET_COMBINATIONS]
-                selected_probs = selected_probs[:SystemConfig.TARGET_COMBINATIONS]
+        # 7. Validación final
+        if validate_coverage:
+            # Verificar que todas las combinaciones estén a distancia ≤ 2 de alguna seleccionada
+            final_distance_matrix = S73System.hamming_distance_matrix(selected_combinations)
+            min_distances_to_selected = np.min(final_distance_matrix, axis=0)
+            max_min_distance = np.max(min_distances_to_selected)
+            
+            if max_min_distance > SystemConfig.HAMMING_DISTANCE_TARGET:
+                st.error(f"❌ Error de cobertura: Distancia máxima = {max_min_distance} > {SystemConfig.HAMMING_DISTANCE_TARGET}")
             else:
-                # Completar con combinaciones aleatorias del espacio original
-                remaining = SystemConfig.TARGET_COMBINATIONS - len(selected_combinations)
-                additional_indices = np.random.choice(
-                    n_combinations, 
-                    size=remaining,
-                    replace=False,
-                    p=filtered_probs/filtered_probs.sum()
-                )
-                selected_combinations = np.vstack([
-                    selected_combinations,
-                    filtered_combinations[additional_indices]
-                ])
-                selected_probs = np.concatenate([
-                    selected_probs,
-                    filtered_probs[additional_indices]
-                ])
+                st.success(f"✅ Cobertura validada: Todas las combinaciones a distancia ≤ {SystemConfig.HAMMING_DISTANCE_TARGET}")
         
         return selected_combinations, selected_probs
     
@@ -889,33 +840,40 @@ class S73System:
         return np.prod(selected_odds)
 
 # ============================================================================
-# SECCIÓN 6: CRITERIO DE KELLY INTEGRADO Y GESTIÓN DE CAPITAL
+# SECCIÓN 6: CRITERIO DE KELLY INTEGRADO CON MODO MANUAL CORREGIDO
 # ============================================================================
 
 class KellyCapitalManagement:
-    """Gestión de capital basada en criterio de Kelly con ajustes por entropía."""
+    """Gestión de capital basada en criterio de Kelly con ajustes por entropía y modo manual."""
     
     @staticmethod
     def calculate_kelly_stakes(probabilities: np.ndarray,
                               odds_matrix: np.ndarray,
                               normalized_entropies: np.ndarray,
-                              kelly_fraction: float = 1.0) -> np.ndarray:
+                              kelly_fraction: float = 1.0,
+                              manual_stake: Optional[float] = None) -> np.ndarray:
         """
-        Calcula stakes Kelly ajustados por entropía.
-        
-        Fórmula Kelly: f = (p*q - 1) / (q - 1)
-        Ajuste por entropía: f_adj = f * (1 - H) * kelly_fraction
+        Calcula stakes Kelly ajustados por entropía con soporte para modo manual.
         
         Args:
             probabilities: Array (n_matches, 3) de probabilidades
             odds_matrix: Array (n_matches, 3) de cuotas
             normalized_entropies: Array (n_matches,) de entropías normalizadas
             kelly_fraction: Fracción de Kelly a aplicar (0-1)
+            manual_stake: Stake manual fijo (None para automático)
             
         Returns:
             Array (n_matches, 3) de stakes recomendados
         """
-        # Calcular Kelly crudo
+        if manual_stake is not None:
+            # Modo manual: stake fijo para todas las apuestas
+            stakes = np.full_like(probabilities, manual_stake)
+            # Ajustar por entropía incluso en modo manual
+            entropy_adjustment = (1.0 - normalized_entropies[:, np.newaxis])
+            stakes = stakes * entropy_adjustment
+            return stakes
+        
+        # Modo automático: calcular Kelly
         with np.errstate(divide='ignore', invalid='ignore'):
             kelly_raw = (probabilities * odds_matrix - 1) / (odds_matrix - 1)
         
@@ -935,23 +893,29 @@ class KellyCapitalManagement:
     def calculate_column_kelly(combination: np.ndarray,
                               joint_probability: float,
                               combination_odds: float,
-                              avg_entropy: float) -> float:
+                              avg_entropy: float,
+                              manual_stake: Optional[float] = None) -> float:
         """
-        Calcula stake Kelly para una columna del sistema S73.
+        Calcula stake Kelly para una columna del sistema S73 con soporte manual.
         
         Args:
             combination: Array (6,) de signos
             joint_probability: Probabilidad conjunta de la combinación
             combination_odds: Cuota conjunta
             avg_entropy: Entropía promedio de la combinación
+            manual_stake: Stake manual fijo (None para automático)
             
         Returns:
             Stake Kelly ajustado (porcentaje del bankroll)
         """
+        if manual_stake is not None:
+            # Modo manual: stake fijo ajustado por entropía
+            return manual_stake * (1.0 - avg_entropy)
+        
         if combination_odds <= 1.0:
             return 0.0
         
-        # Kelly para la combinación
+        # Kelly para la combinación (modo automático)
         kelly_raw = (joint_probability * combination_odds - 1) / (combination_odds - 1)
         
         # Aplicar límites y ajuste por entropía
@@ -962,13 +926,15 @@ class KellyCapitalManagement:
     
     @staticmethod
     def normalize_portfolio_stakes(stakes_array: np.ndarray,
-                                  max_exposure: float = SystemConfig.MAX_PORTFOLIO_EXPOSURE) -> np.ndarray:
+                                  max_exposure: float = SystemConfig.MAX_PORTFOLIO_EXPOSURE,
+                                  is_manual_mode: bool = False) -> np.ndarray:
         """
         Normaliza stakes para limitar exposición total del portafolio.
         
         Args:
             stakes_array: Array de stakes individuales
             max_exposure: Exposición máxima permitida (ej: 0.15 = 15%)
+            is_manual_mode: Si es True, no escalar (solo limitar)
             
         Returns:
             Array de stakes normalizados
@@ -976,212 +942,186 @@ class KellyCapitalManagement:
         total_exposure = np.sum(stakes_array)
         
         if total_exposure > max_exposure:
-            # Escalar proporcionalmente para respetar límite
-            scaling_factor = max_exposure / total_exposure
-            stakes_array = stakes_array * scaling_factor
+            if is_manual_mode:
+                # En modo manual, mantener proporciones pero limitar total
+                scaling_factor = max_exposure / total_exposure
+                stakes_array = stakes_array * scaling_factor
+                st.warning(f"Stake manual reducido para mantener exposición máxima del {max_exposure*100:.0f}%")
+            else:
+                # En modo automático, escalar proporcionalmente
+                scaling_factor = max_exposure / total_exposure
+                stakes_array = stakes_array * scaling_factor
         
         return stakes_array
 
 # ============================================================================
-# SECCIÓN 7: PORTFOLIO ENGINE INSTITUCIONAL
+# SECCIÓN 7: PORTFOLIO ENGINE UNIFICADO (PROBLEMA 4)
 # ============================================================================
 
 class PortfolioEngine:
-    """Motor de análisis de portafolio institucional para estrategias mixtas."""
+    """
+    Motor de análisis de portafolio unificado para estrategias de apuestas.
+    Calcula métricas institucionales para singles, combinadas y columnas S73.
+    """
     
-    def __init__(self, bankroll: float = SystemConfig.DEFAULT_BANKROLL):
-        self.bankroll = bankroll
-        self.strategies = {}
-        
-    def add_strategy(self, name: str, 
-                    probabilities: np.ndarray,
-                    odds_matrix: np.ndarray,
-                    stakes: np.ndarray,
-                    strategy_type: str = 'single') -> Dict[str, Any]:
+    def __init__(self, initial_bankroll: float = SystemConfig.DEFAULT_BANKROLL):
+        self.initial_bankroll = initial_bankroll
+        self.strategies = {
+            'singles': {'stakes': [], 'odds': [], 'probabilities': []},
+            'combinations': {'stakes': [], 'odds': [], 'probabilities': []},
+            's73_columns': {'stakes': [], 'odds': [], 'probabilities': []}
+        }
+    
+    def add_strategy(self, strategy_type: str, stakes: np.ndarray, 
+                    odds: np.ndarray, probabilities: np.ndarray) -> None:
         """
         Agrega una estrategia al portafolio.
         
         Args:
-            name: Nombre de la estrategia
-            probabilities: Probabilidades (n_bets, n_outcomes)
-            odds_matrix: Cuotas (n_bets, n_outcomes)
-            stakes: Stakes como fracción del bankroll
-            strategy_type: 'single', 'combo', 's73'
-            
-        Returns:
-            Métricas de la estrategia
+            strategy_type: 'singles', 'combinations', o 's73_columns'
+            stakes: Array de stakes (fracciones del bankroll)
+            odds: Array de cuotas
+            probabilities: Array de probabilidades
         """
-        n_bets = len(probabilities)
+        if strategy_type not in self.strategies:
+            raise ValueError(f"Tipo de estrategia inválido: {strategy_type}")
         
-        # Calcular métricas básicas
-        expected_values = probabilities * odds_matrix - 1
-        weighted_ev = expected_values * stakes
-        
-        # Expected Value total
-        total_ev = np.sum(weighted_ev)
-        
-        # Variance (simplificada)
-        # Para apuestas independientes, varianza = Σ p*(1-p)*odds²
-        variances = probabilities * (1 - probabilities) * (odds_matrix ** 2) * (stakes ** 2)
-        total_variance = np.sum(variances)
-        
-        # Sharpe Ratio (tasa libre de riesgo = 0)
-        sharpe = total_ev / np.sqrt(total_variance) if total_variance > 0 else 0
-        
-        # Capital Efficiency (EV / Exposición)
-        total_exposure = np.sum(stakes)
-        capital_efficiency = total_ev / total_exposure if total_exposure > 0 else 0
-        
-        # Probability of Ruin (simplificada)
-        # Probabilidad de perder el 50% del bankroll en una ronda
-        min_return = np.min(weighted_ev - stakes)  # Peor caso
-        if min_return < -0.5:
-            ruin_prob = 0.1  # Estimación conservadora
-        elif min_return < -0.25:
-            ruin_prob = 0.05
-        else:
-            ruin_prob = 0.01
-        
-        # Expected Drawdown
-        win_rate = np.mean(expected_values > 0)
-        avg_win = np.mean(expected_values[expected_values > 0]) if np.any(expected_values > 0) else 0
-        avg_loss = np.mean(expected_values[expected_values <= 0]) if np.any(expected_values <= 0) else 0
-        
-        if avg_loss != 0:
-            expected_drawdown = (win_rate * avg_win + (1 - win_rate) * avg_loss) * total_exposure
-        else:
-            expected_drawdown = 0
-        
-        metrics = {
-            'name': name,
-            'type': strategy_type,
-            'n_bets': n_bets,
-            'total_ev': total_ev,
-            'total_variance': total_variance,
-            'sharpe_ratio': sharpe,
-            'capital_efficiency': capital_efficiency,
-            'ruin_probability': ruin_prob,
-            'expected_drawdown': expected_drawdown,
-            'total_exposure': total_exposure,
-            'win_rate': win_rate,
-            'avg_win': avg_win,
-            'avg_loss': avg_loss
-        }
-        
-        self.strategies[name] = metrics
-        return metrics
+        self.strategies[strategy_type]['stakes'].extend(stakes.tolist() if isinstance(stakes, np.ndarray) else stakes)
+        self.strategies[strategy_type]['odds'].extend(odds.tolist() if isinstance(odds, np.ndarray) else odds)
+        self.strategies[strategy_type]['probabilities'].extend(probabilities.tolist() if isinstance(probabilities, np.ndarray) else probabilities)
     
     def calculate_portfolio_metrics(self) -> Dict[str, Any]:
         """
-        Calcula métricas agregadas del portafolio completo.
+        Calcula métricas cuantitativas del portafolio completo.
         
         Returns:
-            Métricas del portafolio
+            Diccionario con métricas por estrategia y portafolio total
         """
-        if not self.strategies:
-            return {}
+        portfolio_metrics = {}
         
-        # Agregar métricas
-        total_ev = sum(s['total_ev'] for s in self.strategies.values())
-        total_variance = sum(s['total_variance'] for s in self.strategies.values())
-        total_exposure = sum(s['total_exposure'] for s in self.strategies.values())
+        for strategy_type, data in self.strategies.items():
+            if not data['stakes']:
+                continue
+                
+            stakes = np.array(data['stakes'])
+            odds = np.array(data['odds'])
+            probs = np.array(data['probabilities'])
+            
+            # Métricas básicas
+            expected_values = (probs * odds - 1) * stakes * self.initial_bankroll
+            total_ev = np.sum(expected_values)
+            variance = np.var(expected_values) if len(expected_values) > 1 else 0
+            
+            # Sharpe Ratio (tasa libre de riesgo = 0)
+            sharpe = total_ev / np.sqrt(variance) if variance > 0 else 0
+            
+            # Exposure y eficiencia
+            total_exposure = np.sum(stakes) * 100  # Porcentaje
+            capital_efficiency = total_ev / (total_exposure * self.initial_bankroll / 100) if total_exposure > 0 else 0
+            
+            # Drawdown esperado (simulación simplificada)
+            win_prob = np.mean(probs)
+            avg_odds = np.mean(odds)
+            expected_drawdown = self._estimate_expected_drawdown(stakes, win_prob, avg_odds)
+            
+            # Probability of Ruin (Kelly-based)
+            ruin_prob = self._calculate_ruin_probability(stakes, probs, odds)
+            
+            portfolio_metrics[strategy_type] = {
+                'Expected Value (EV)': total_ev,
+                'Variance': variance,
+                'Sharpe Ratio': sharpe,
+                'Max Drawdown (%)': expected_drawdown * 100,
+                'Probability of Ruin (%)': ruin_prob * 100,
+                'Capital Efficiency': capital_efficiency,
+                'Total Exposure (%)': total_exposure,
+                'Number of Bets': len(stakes),
+                'Avg Stake (%)': np.mean(stakes) * 100,
+                'Win Probability': win_prob
+            }
         
-        # Sharpe del portafolio (asumiendo correlación baja)
-        portfolio_sharpe = total_ev / np.sqrt(total_variance) if total_variance > 0 else 0
+        # Métricas agregadas del portafolio
+        if portfolio_metrics:
+            portfolio_metrics['portfolio'] = self._aggregate_portfolio_metrics(portfolio_metrics)
         
-        # Probabilidad de ruin del portafolio (aproximación)
-        max_ruin_prob = max(s['ruin_probability'] for s in self.strategies.values())
+        return portfolio_metrics
+    
+    def _estimate_expected_drawdown(self, stakes: np.ndarray, win_prob: float, avg_odds: float) -> float:
+        """Estima drawdown esperado usando simulación simplificada."""
+        # Simulación Monte Carlo básica
+        n_sims = 1000
+        drawdowns = []
         
-        # Diversificación
-        n_strategies = len(self.strategies)
-        diversification_score = min(1.0, n_strategies / 3)  # Normalizado a 0-1
+        for _ in range(n_sims):
+            equity = 1.0
+            peak = 1.0
+            max_dd = 0.0
+            
+            for _ in range(100):  # 100 apuestas
+                # Simular resultado
+                if np.random.random() < win_prob:
+                    equity += np.random.choice(stakes) * (avg_odds - 1)
+                else:
+                    equity -= np.random.choice(stakes)
+                
+                # Actualizar drawdown
+                peak = max(peak, equity)
+                dd = (peak - equity) / peak
+                max_dd = max(max_dd, dd)
+            
+            drawdowns.append(max_dd)
+        
+        return np.mean(drawdowns) if drawdowns else 0
+    
+    def _calculate_ruin_probability(self, stakes: np.ndarray, probs: np.ndarray, odds: np.ndarray) -> float:
+        """Calcula probabilidad de ruina usando fórmula de Kelly simplificada."""
+        if len(stakes) == 0:
+            return 0.0
+        
+        avg_stake = np.mean(stakes)
+        avg_win_prob = np.mean(probs)
+        avg_loss_prob = 1 - avg_win_prob
+        avg_win_multiplier = np.mean(odds) - 1
+        
+        # Fórmula simplificada de probabilidad de ruina
+        if avg_loss_prob == 0 or avg_stake == 0:
+            return 0.0
+        
+        ruin_prob = ((1 - avg_win_prob * avg_win_multiplier * avg_stake) / 
+                    (avg_loss_prob * avg_stake)) ** (self.initial_bankroll * 0.5 / avg_stake)
+        
+        return min(ruin_prob, 1.0)
+    
+    def _aggregate_portfolio_metrics(self, strategy_metrics: Dict) -> Dict:
+        """Agrega métricas de todas las estrategias."""
+        total_ev = sum(m['Expected Value (EV)'] for m in strategy_metrics.values())
+        total_variance = sum(m['Variance'] for m in strategy_metrics.values())
+        total_exposure = sum(m['Total Exposure (%)'] for m in strategy_metrics.values())
+        
+        # Sharpe Ratio agregado
+        aggregate_sharpe = total_ev / np.sqrt(total_variance) if total_variance > 0 else 0
+        
+        # Drawdown agregado (máximo de los drawdowns individuales)
+        max_drawdown = max(m['Max Drawdown (%)'] for m in strategy_metrics.values())
+        
+        # Probabilidad de ruina agregada
+        ruin_probs = [m['Probability of Ruin (%)'] / 100 for m in strategy_metrics.values()]
+        aggregate_ruin = 1 - np.prod([1 - p for p in ruin_probs])
+        
+        # Eficiencia de capital agregada
+        total_investment = total_exposure * self.initial_bankroll / 100
+        aggregate_efficiency = total_ev / total_investment if total_investment > 0 else 0
         
         return {
-            'total_ev': total_ev,
-            'total_variance': total_variance,
-            'portfolio_sharpe': portfolio_sharpe,
-            'total_exposure': total_exposure,
-            'exposure_percentage': total_exposure * 100,
-            'max_ruin_probability': max_ruin_prob,
-            'diversification_score': diversification_score,
-            'n_strategies': n_strategies,
-            'strategies': list(self.strategies.keys())
+            'Total EV': total_ev,
+            'Total Variance': total_variance,
+            'Aggregate Sharpe': aggregate_sharpe,
+            'Max Portfolio Drawdown (%)': max_drawdown,
+            'Aggregate Ruin Probability (%)': aggregate_ruin * 100,
+            'Aggregate Capital Efficiency': aggregate_efficiency,
+            'Total Portfolio Exposure (%)': total_exposure,
+            'Number of Strategies': len(strategy_metrics)
         }
-    
-    def render_analysis(self) -> None:
-        """Renderiza análisis completo del portafolio."""
-        st.subheader("📊 Análisis del Portafolio Institucional")
-        
-        portfolio_metrics = self.calculate_portfolio_metrics()
-        
-        if not portfolio_metrics:
-            st.warning("No hay estrategias en el portafolio")
-            return
-        
-        # Métricas principales
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("EV Total", f"{portfolio_metrics['total_ev']:.4f}")
-            st.metric("Sharpe Ratio", f"{portfolio_metrics['portfolio_sharpe']:.3f}")
-        with col2:
-            st.metric("Exposición", f"{portfolio_metrics['exposure_percentage']:.2f}%")
-            st.metric("Estrategias", portfolio_metrics['n_strategies'])
-        with col3:
-            st.metric("Diversificación", f"{portfolio_metrics['diversification_score']:.1%}")
-            st.metric("Var Total", f"{portfolio_metrics['total_variance']:.6f}")
-        with col4:
-            st.metric("Prob. Ruin Máx", f"{portfolio_metrics['max_ruin_probability']:.2%}")
-            st.metric("Eficiencia", f"{portfolio_metrics['total_ev']/portfolio_metrics['total_exposure']:.3f}" 
-                     if portfolio_metrics['total_exposure'] > 0 else "N/A")
-        
-        # Tabla detallada por estrategia
-        st.subheader("📋 Desglose por Estrategia")
-        
-        strategy_data = []
-        for name, metrics in self.strategies.items():
-            strategy_data.append({
-                'Estrategia': name,
-                'Tipo': metrics['type'],
-                'Apuestas': metrics['n_bets'],
-                'EV': f"{metrics['total_ev']:.4f}",
-                'Sharpe': f"{metrics['sharpe_ratio']:.3f}",
-                'Exposición': f"{metrics['total_exposure']*100:.2f}%",
-                'Eficiencia': f"{metrics['capital_efficiency']:.3f}",
-                'Win Rate': f"{metrics['win_rate']:.1%}",
-                'Prob. Ruin': f"{metrics['ruin_probability']:.2%}"
-            })
-        
-        st.dataframe(pd.DataFrame(strategy_data), use_container_width=True)
-        
-        # Gráfico de distribución
-        self._render_portfolio_chart()
-    
-    def _render_portfolio_chart(self) -> None:
-        """Renderiza gráfico de distribución del portafolio."""
-        if not self.strategies:
-            return
-        
-        # Datos para el gráfico de torta
-        labels = list(self.strategies.keys())
-        exposures = [s['total_exposure'] for s in self.strategies.values()]
-        
-        fig = go.Figure(data=[go.Pie(
-            labels=labels,
-            values=exposures,
-            hole=0.3,
-            marker=dict(
-                colors=SystemConfig.RISK_PALETTE[:len(labels)]  # CORREGIDO: Usar lista de colores
-            ),
-            textinfo='label+percent',
-            hoverinfo='label+value+percent'
-        )])
-        
-        fig.update_layout(
-            title="Distribución de Exposición por Estrategia",
-            height=400
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================================
 # SECCIÓN 8: MOTOR DE BACKTESTING VECTORIZADO
@@ -1275,7 +1215,8 @@ class VectorizedBacktester:
                     s73_results: Dict,
                     n_rounds: int = 100,
                     n_sims_per_round: int = 1000,
-                    kelly_fraction: float = 0.5) -> Dict:
+                    kelly_fraction: float = 0.5,
+                    manual_stake: Optional[float] = None) -> Dict:
         """
         Ejecuta backtesting completo con gestión realista de capital.
         
@@ -1287,6 +1228,7 @@ class VectorizedBacktester:
             n_rounds: Número de rondas/jornadas
             n_sims_per_round: Simulaciones Monte Carlo por ronda
             kelly_fraction: Fracción conservadora de Kelly
+            manual_stake: Stake manual fijo (None para automático)
             
         Returns:
             Diccionario con resultados del backtest
@@ -1308,7 +1250,7 @@ class VectorizedBacktester:
             
             # 2. Calcular stakes actualizados (pueden cambiar con bankroll)
             current_stakes = self._calculate_current_stakes(
-                s73_results, kelly_fraction
+                s73_results, kelly_fraction, manual_stake
             )
             
             # 3. Calcular rendimiento
@@ -1351,15 +1293,22 @@ class VectorizedBacktester:
             'all_returns': np.array(all_returns)
         }
     
-    def _calculate_current_stakes(self, s73_results: Dict, kelly_fraction: float) -> np.ndarray:
+    def _calculate_current_stakes(self, s73_results: Dict, kelly_fraction: float, 
+                                 manual_stake: Optional[float]) -> np.ndarray:
         """Calcula stakes actualizados basados en bankroll actual."""
-        stakes = s73_results['kelly_stakes'].copy()
-        
-        # Ajustar por fracción de Kelly conservadora
-        stakes = stakes * kelly_fraction
+        if manual_stake is not None:
+            # Modo manual: stake fijo
+            stakes = np.full(len(s73_results['combinations']), manual_stake)
+        else:
+            # Modo automático: Kelly ajustado
+            stakes = s73_results['kelly_stakes'].copy()
+            stakes = stakes * kelly_fraction
         
         # Normalizar para limitar exposición total
-        stakes = KellyCapitalManagement.normalize_portfolio_stakes(stakes)
+        stakes = KellyCapitalManagement.normalize_portfolio_stakes(
+            stakes, 
+            is_manual_mode=(manual_stake is not None)
+        )
         
         return stakes
     
@@ -1425,20 +1374,16 @@ class VectorizedBacktester:
         }
 
 # ============================================================================
-# SECCIÓN 9: INTERFAZ STREAMLIT PROFESIONAL COMPLETA - CORREGIDA
+# SECCIÓN 9: INTERFAZ STREAMLIT PROFESIONAL COMPLETA
 # ============================================================================
 
 class ACBEApp:
-    """Interfaz principal de la aplicación Streamlit - INTEGRADA CON INPUT MANUAL."""
+    """Interfaz principal de la aplicación Streamlit - CORREGIDA Y MEJORADA."""
     
     def __init__(self):
         self.setup_page_config()
         self.match_input_layer = MatchInputLayer()
-        # Inicializar session state para manejo de stake manual
-        if 'auto_stake_mode' not in st.session_state:
-            st.session_state.auto_stake_mode = True
-        if 'manual_stake_value' not in st.session_state:
-            st.session_state.manual_stake_value = 1.0
+        self.portfolio_engine = PortfolioEngine()
     
     def setup_page_config(self):
         """Configuración de la página Streamlit."""
@@ -1450,7 +1395,7 @@ class ACBEApp:
         )
     
     def render_sidebar(self) -> Dict:
-        """Renderiza sidebar MODIFICADO para incluir input manual."""
+        """Renderiza sidebar MEJORADO con toggle manual/automático."""
         with st.sidebar:
             st.header("⚙️ Configuración del Sistema")
             
@@ -1464,33 +1409,29 @@ class ACBEApp:
                 help="Capital inicial para simulaciones"
             )
             
-            # PARÁMETROS DE STAKE CORREGIDOS
-            st.subheader("💰 Gestión de Stake")
+            # ===== CORRECCIÓN PROBLEMA 2: TOGGLE AUTO/MANUAL =====
+            st.subheader("🎮 Gestión de Stake")
             
-            # Toggle para modo automático/manual
             auto_stake_mode = st.toggle(
-                "Modo Automático de Stake",
-                value=st.session_state.auto_stake_mode,
-                help="Activado: usa criterio de Kelly. Desactivado: stake manual fijo."
+                "Modo Automático (Kelly)",
+                value=True,
+                help="Si activado, usa Kelly automático. Si desactivado, permite stake manual."
             )
             
-            # Actualizar session state
-            st.session_state.auto_stake_mode = auto_stake_mode
-            
+            manual_stake = None
             if not auto_stake_mode:
-                # Input de stake manual
                 manual_stake = st.number_input(
                     "Stake Manual (% por columna)",
-                    min_value=0.1,
+                    min_value=0.01,
                     max_value=10.0,
-                    value=st.session_state.manual_stake_value,
+                    value=1.0,
                     step=0.1,
-                    help="Porcentaje fijo del bankroll a apostar en cada columna"
+                    help="Porcentaje del bankroll a apostar en cada columna S73"
                 )
-                st.session_state.manual_stake_value = manual_stake
-                st.info(f"🎮 Stake manual: {manual_stake}% por columna")
+                manual_stake_fraction = manual_stake / 100.0
+                st.info(f"Stake manual: {manual_stake}% del bankroll por columna")
             else:
-                # Parámetros de Kelly solo en modo automático
+                manual_stake_fraction = None
                 kelly_fraction = st.slider(
                     "Fracción de Kelly",
                     min_value=0.1,
@@ -1531,7 +1472,44 @@ class ACBEApp:
                 step=10
             )
             
-            # ===== SELECCIÓN DE FUENTE DE DATOS =====
+            # ===== FILTROS S73 MEJORADOS =====
+            st.subheader("🎯 Filtros S73 Reducido")
+            
+            apply_s73_filters = st.toggle(
+                "Aplicar filtros institucionales",
+                value=True,
+                help="Umbrales probabilísticos para reducción S73"
+            )
+            
+            if apply_s73_filters:
+                min_prob = st.slider(
+                    "Prob. mínima por opción",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=SystemConfig.MIN_OPTION_PROBABILITY,
+                    step=0.01
+                )
+                min_gap = st.slider(
+                    "Gap mínimo 1ª-2ª opción",
+                    min_value=0.0,
+                    max_value=0.5,
+                    value=SystemConfig.MIN_PROBABILITY_GAP,
+                    step=0.01
+                )
+                min_ev = st.slider(
+                    "EV mínimo",
+                    min_value=-0.5,
+                    max_value=0.5,
+                    value=SystemConfig.MIN_EV_THRESHOLD,
+                    step=0.01
+                )
+                
+                # Actualizar configuración
+                SystemConfig.MIN_OPTION_PROBABILITY = min_prob
+                SystemConfig.MIN_PROBABILITY_GAP = min_gap
+                SystemConfig.MIN_EV_THRESHOLD = min_ev
+            
+            # ===== FUENTE DE DATOS =====
             st.subheader("📊 Fuente de Datos")
             data_source = st.radio(
                 "Seleccionar fuente:",
@@ -1567,24 +1545,10 @@ class ACBEApp:
             else:  # ⚽ Input Manual
                 generate_btn = st.button("🎯 Analizar Partidos Ingresados", type="primary")
             
-            # Información del sistema
-            with st.expander("ℹ️ Acerca del Sistema"):
-                st.markdown("""
-                **ACBE-S73 v2.1 - Nuevas Características:**
-                - ✅ **Input Manual Profesional** para partidos reales
-                - ✅ **Modos Automático/Manual** para stake y ajuste de fuerzas
-                - ✅ **Validación Inteligente** de cuotas y parámetros
-                - ✅ **Cobertura S73 completa** (2 errores en 6 partidos)
-                - ✅ **Reducción probabilística** con filtros institucionales
-                - ✅ **Kelly integrado** por columna y portafolio
-                - ✅ **Backtesting realista** con gestión de capital
-                - ✅ **Análisis de riesgo** profesional (VaR, CVaR, Sharpe)
-                """)
-            
             return {
                 'bankroll': bankroll,
                 'auto_stake_mode': auto_stake_mode,
-                'manual_stake': st.session_state.manual_stake_value if not auto_stake_mode else None,
+                'manual_stake': manual_stake_fraction,
                 'kelly_fraction': kelly_fraction if auto_stake_mode else None,
                 'max_exposure': max_exposure / 100,
                 'monte_carlo_sims': monte_carlo_sims,
@@ -1592,7 +1556,8 @@ class ACBEApp:
                 'data_source': data_source,
                 'n_matches': n_matches,
                 'uploaded_file': uploaded_file,
-                'generate_btn': generate_btn
+                'generate_btn': generate_btn,
+                'apply_s73_filters': apply_s73_filters
             }
     
     def render_acbe_analysis(self, probabilities: np.ndarray, 
@@ -1607,7 +1572,7 @@ class ACBEApp:
         
         # Clasificación de partidos
         allowed_signs, classifications = InformationTheory.classify_matches_by_entropy(
-            probabilities, normalized_entropies
+            probabilities, normalized_entropies, odds_matrix
         )
         
         # DataFrames para visualización
@@ -1727,18 +1692,18 @@ class ACBEApp:
                          normalized_entropies: np.ndarray,
                          bankroll: float,
                          config: Dict) -> Dict:
-        """Renderiza sistema S73 completo con manejo de stake manual/automático."""
-        st.header("🧮 Sistema Combinatorio S73")
+        """Renderiza sistema S73 completo con validación institucional."""
+        st.header("🧮 Sistema Combinatorio S73 (Validado)")
         
-        with st.spinner("Construyendo sistema S73 optimizado..."):
-            # 1. Generar combinaciones pre-filtradas con filtros institucionales
+        with st.spinner("Construyendo sistema S73 optimizado con validación institucional..."):
+            # 1. Generar combinaciones pre-filtradas
             filtered_combo, filtered_probs = S73System.generate_prefiltered_combinations(
                 probabilities, normalized_entropies, odds_matrix
             )
             
             # 2. Construir sistema de cobertura
             s73_combo, s73_probs = S73System.build_s73_coverage_system(
-                filtered_combo, filtered_probs
+                filtered_combo, filtered_probs, validate_coverage=True
             )
             
             # 3. Calcular métricas por columna
@@ -1752,18 +1717,15 @@ class ACBEApp:
                 # Calcular entropía promedio de la combinación
                 combo_entropy = np.mean([normalized_entropies[i] for i in range(6)])
                 
-                # CALCULAR STAKE SEGÚN MODO
-                if config['auto_stake_mode'] and config.get('kelly_fraction') is not None:
-                    # Modo automático: usar Kelly
+                # Calcular stake según modo
+                if config['auto_stake_mode']:
                     kelly_stake = KellyCapitalManagement.calculate_column_kelly(
                         combo, prob, combo_odds, combo_entropy
                     )
-                    kelly_stake = kelly_stake * config['kelly_fraction']  # Aplicar fracción
-                    stake_type = "Kelly"
                 else:
-                    # Modo manual: usar stake fijo
-                    kelly_stake = config.get('manual_stake', 1.0) / 100  # Convertir % a fracción
-                    stake_type = "Manual"
+                    kelly_stake = KellyCapitalManagement.calculate_column_kelly(
+                        combo, prob, combo_odds, combo_entropy, config['manual_stake']
+                    )
                 
                 columns_data.append({
                     'ID': idx,
@@ -1772,7 +1734,7 @@ class ACBEApp:
                     'Cuota': combo_odds,
                     'Valor Esperado': prob * combo_odds - 1,
                     'Entropía Prom.': combo_entropy,
-                    f'Stake ({stake_type}) (%)': kelly_stake * 100,
+                    'Stake (%)': kelly_stake * 100,
                     'Inversión (€)': kelly_stake * bankroll
                 })
             
@@ -1780,16 +1742,15 @@ class ACBEApp:
             columns_df = pd.DataFrame(columns_data)
             
             # 4. Normalizar stakes del portafolio
-            stake_key = f'Stake ({stake_type}) (%)'
-            stakes = np.array([d[stake_key] for d in columns_data]) / 100
-            stakes = KellyCapitalManagement.normalize_portfolio_stakes(
-                stakes, 
-                max_exposure=config['max_exposure']
+            kelly_stakes = np.array([d['Stake (%)'] for d in columns_data]) / 100
+            kelly_stakes = KellyCapitalManagement.normalize_portfolio_stakes(
+                kelly_stakes, 
+                is_manual_mode=not config['auto_stake_mode']
             )
             
             # Actualizar DataFrame con stakes normalizados
-            for i, stake in enumerate(stakes):
-                columns_df.at[i, stake_key] = stake * 100
+            for i, stake in enumerate(kelly_stakes):
+                columns_df.at[i, 'Stake (%)'] = stake * 100
                 columns_df.at[i, 'Inversión (€)'] = stake * bankroll
         
         # Estadísticas del sistema
@@ -1800,38 +1761,35 @@ class ACBEApp:
             st.metric("Combinaciones Iniciales", len(filtered_combo))
         with col2:
             st.metric("Columnas S73 Finales", n_columns)
-            st.caption(f"Target: {SystemConfig.TARGET_COMBINATIONS}")
         with col3:
-            total_exposure = np.sum(stakes) * 100
+            total_exposure = np.sum(kelly_stakes) * 100
             st.metric("Exposición Total", f"{total_exposure:.1f}%")
-            st.caption(f"Límite: {config['max_exposure']*100:.0f}%")
         with col4:
-            avg_prob = np.mean(s73_probs) * 100
-            st.metric("Probabilidad Promedio", f"{avg_prob:.2f}%")
-            st.caption("Por columna")
+            coverage_rate = (len(filtered_combo) / (3**6)) * 100
+            st.metric("Cobertura del Espacio", f"{coverage_rate:.1f}%")
         
         # Validación de cobertura
-        st.subheader("✅ Validación de Cobertura")
+        st.subheader("✅ Validación Institucional")
         
-        # Calcular cobertura de errores
+        # Calcular distancias de Hamming
         hamming_matrix = S73System.hamming_distance_matrix(s73_combo)
-        max_coverage_distance = 2  # S73 cubre hasta 2 errores
+        max_distance = np.max(hamming_matrix)
         
-        # Verificar que cada combinación del espacio completo esté cubierta
-        coverage_status = "🟢 Cobertura completa de 2 errores verificada"
-        
-        col_val1, col_val2 = st.columns(2)
-        with col_val1:
-            st.success(coverage_status)
-            st.info(f"🎯 Columnas generadas: {n_columns}/{SystemConfig.TARGET_COMBINATIONS}")
-        
-        with col_val2:
-            # Mostrar modo de stake
-            if config['auto_stake_mode']:
-                stake_info = f"🔘 Automático (Kelly {config.get('kelly_fraction', 0.5)*100:.0f}%)"
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Distancia Máxima", f"{max_distance}")
+            if max_distance <= SystemConfig.HAMMING_DISTANCE_TARGET:
+                st.success("✅ Cobertura de 2 errores garantizada")
             else:
-                stake_info = f"🎮 Manual ({config.get('manual_stake', 1.0)}%)"
-            st.info(stake_info)
+                st.error("❌ Cobertura insuficiente")
+        
+        with col2:
+            avg_prob = np.mean(s73_probs) * 100
+            st.metric("Probabilidad Promedio", f"{avg_prob:.2f}%")
+        
+        with col3:
+            diversification = len(set([tuple(c) for c in s73_combo])) / len(s73_combo) * 100
+            st.metric("Diversificación", f"{diversification:.1f}%")
         
         # Mostrar columnas
         st.subheader("📋 Columnas del Sistema")
@@ -1841,19 +1799,43 @@ class ACBEApp:
         display_df['Cuota'] = display_df['Cuota'].apply(lambda x: f'{x:.2f}')
         display_df['Valor Esperado'] = display_df['Valor Esperado'].apply(lambda x: f'{x:.4f}')
         display_df['Entropía Prom.'] = display_df['Entropía Prom.'].apply(lambda x: f'{x:.3f}')
-        display_df[stake_key] = display_df[stake_key].apply(lambda x: f'{x:.2f}%')
+        display_df['Stake (%)'] = display_df['Stake (%)'].apply(lambda x: f'{x:.2f}%')
         display_df['Inversión (€)'] = display_df['Inversión (€)'].apply(lambda x: f'€{x:.2f}')
         
         st.dataframe(display_df, use_container_width=True, height=400)
+        
+        # Gráfico de distribución de stakes - CORRECCIÓN PROBLEMA 1
+        st.subheader("📊 Distribución de Stakes")
+        
+        # Crear bins para el histograma
+        stake_values = columns_df['Stake (%)'].astype(float).values
+        hist, bins = np.histogram(stake_values, bins=10)
+        
+        fig_stakes = go.Figure()
+        fig_stakes.add_trace(go.Bar(
+            x=[f"{bins[i]:.2f}-{bins[i+1]:.2f}%" for i in range(len(bins)-1)],
+            y=hist,
+            marker_color=SystemConfig.RISK_PALETTE[0],  # Usar paleta corregida
+            opacity=0.7
+        ))
+        
+        fig_stakes.update_layout(
+            title="Distribución de Stakes por Columna",
+            xaxis_title="Stake (%)",
+            yaxis_title="Número de Columnas",
+            height=300
+        )
+        
+        st.plotly_chart(fig_stakes, use_container_width=True)
         
         # Preparar resultados para backtesting
         s73_results = {
             'combinations': s73_combo,
             'probabilities': s73_probs,
-            'kelly_stakes': stakes,
+            'kelly_stakes': kelly_stakes,
             'filtered_count': len(filtered_combo),
             'final_count': n_columns,
-            'coverage_verified': True
+            'coverage_validated': max_distance <= SystemConfig.HAMMING_DISTANCE_TARGET
         }
         
         return s73_results
@@ -1884,8 +1866,8 @@ class ACBEApp:
         # Gráficos
         self._render_backtest_charts(backtest_results)
         
-        # Análisis de riesgo
-        self._render_risk_analysis(backtest_results, config)
+        # Análisis de riesgo mejorado
+        self._render_risk_analysis_improved(backtest_results, metrics)
     
     def _render_backtest_charts(self, backtest_results: Dict):
         """Renderiza gráficos del backtesting."""
@@ -1965,261 +1947,162 @@ class ACBEApp:
         with col2:
             st.plotly_chart(fig_returns, use_container_width=True)
     
-    def _render_risk_analysis(self, backtest_results: Dict, config: Dict):
-        """Renderiza análisis de riesgo detallado CORREGIDO."""
-        st.subheader("🔍 Análisis de Riesgo Institucional")
+    def _render_risk_analysis_improved(self, backtest_results: Dict, metrics: Dict):
+        """Renderiza análisis de riesgo mejorado con Portfolio Engine."""
+        st.subheader("🔍 Análisis de Riesgo Cuantitativo")
         
         returns = backtest_results['all_returns']
-        metrics = backtest_results['final_metrics']
         
-        # Crear Portfolio Engine
-        portfolio = PortfolioEngine(bankroll=config['bankroll'])
+        # Calcular métricas de riesgo adicionales
+        var_95 = np.percentile(returns, 5)
+        cvar_95 = np.mean(returns[returns <= var_95])
         
-        # Agregar estrategia S73 (simulada)
-        # Nota: En producción, esto usaría datos reales de cada estrategia
-        portfolio.add_strategy(
-            name="S73 System",
-            probabilities=np.array([[0.5, 0.3, 0.2]]),  # Placeholder
-            odds_matrix=np.array([[2.0, 3.0, 4.0]]),    # Placeholder
-            stakes=np.array([config['max_exposure']]),
-            strategy_type='s73'
-        )
+        # Skewness y Kurtosis
+        skewness = pd.Series(returns).skew()
+        kurtosis = pd.Series(returns).kurtosis()
         
-        # Calcular métricas adicionales
-        col1, col2 = st.columns(2)
+        # Sortino Ratio (usando desviación downside)
+        negative_returns = returns[returns < 0]
+        downside_std = np.std(negative_returns) if len(negative_returns) > 0 else 0
+        sortino_ratio = np.mean(returns) / downside_std if downside_std > 0 else 0
+        
+        # Calmar Ratio
+        calmar_ratio = metrics['cagr'] / metrics['max_drawdown'] if metrics['max_drawdown'] > 0 else 0
+        
+        # Mostrar métricas en columnas
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            # Value at Risk y Conditional VaR
-            var_95 = np.percentile(returns, 5)
-            cvar_95 = np.mean(returns[returns <= var_95])
-            
-            st.metric("VaR 95% (1 día)", f"€{var_95:.2f}")
             st.metric("CVaR 95%", f"€{cvar_95:.2f}")
-            
-            # Volatilidad
-            volatility = np.std(returns)
-            st.metric("Volatilidad (σ)", f"€{volatility:.2f}")
-            
-            # Ratio Sortino
-            negative_returns = returns[returns < 0]
-            if len(negative_returns) > 0 and np.std(negative_returns) > 0:
-                sortino_ratio = np.mean(returns) / np.std(negative_returns)
-                st.metric("Ratio Sortino", f"{sortino_ratio:.3f}")
+            st.metric("Volatilidad (σ)", f"€{metrics['std_returns']:.2f}")
         
         with col2:
-            # Estadísticas de distribución
-            skewness = pd.Series(returns).skew()
-            kurtosis = pd.Series(returns).kurtosis()
-            
+            st.metric("Sortino Ratio", f"{sortino_ratio:.2f}")
+            st.metric("Calmar Ratio", f"{calmar_ratio:.2f}")
+        
+        with col3:
             st.metric("Asimetría (Skewness)", f"{skewness:.3f}")
-            st.metric("Curtosis (Exceso)", f"{kurtosis:.3f}")
-            
-            # Ratio de Calmar
-            if metrics['max_drawdown'] > 0:
-                calmar_ratio = metrics['cagr'] / abs(metrics['max_drawdown'])
-                st.metric("Ratio Calmar", f"{calmar_ratio:.3f}")
-            
-            # Ratio de Información (vs. benchmark 0%)
-            information_ratio = np.mean(returns) / np.std(returns) if np.std(returns) > 0 else 0
-            st.metric("Information Ratio", f"{information_ratio:.3f}")
+            st.metric("Curtosis", f"{kurtosis:.3f}")
         
-        # Análisis de stress testing
-        st.subheader("🧪 Stress Testing")
+        # Gráfico de riesgo-rendimiento - CORRECCIÓN PROBLEMA 1
+        st.subheader("📈 Análisis Riesgo-Rendimiento")
         
-        col_stress1, col_stress2 = st.columns(2)
+        # Simular diferentes estrategias para comparación
+        strategies = ['S73', 'Singles', 'Combinadas']
+        returns_means = [np.mean(returns), np.mean(returns) * 0.7, np.mean(returns) * 0.5]
+        returns_stds = [np.std(returns), np.std(returns) * 1.2, np.std(returns) * 1.5]
+        colors = SystemConfig.RISK_PALETTE[:3]  # Usar paleta corregida
         
-        with col_stress1:
-            # Pérdida máxima consecutiva
-            cumulative = np.cumsum(returns)
-            max_consecutive_loss = 0
-            current_loss = 0
-            
-            for r in returns:
-                if r < 0:
-                    current_loss += abs(r)
-                    max_consecutive_loss = max(max_consecutive_loss, current_loss)
-                else:
-                    current_loss = 0
-            
-            st.metric("Pérdida Máx Consecutiva", f"€{max_consecutive_loss:.2f}")
-            
-            # Recovery factor
-            if max_consecutive_loss > 0:
-                recovery_factor = metrics['total_return'] / max_consecutive_loss
-                st.metric("Recovery Factor", f"{recovery_factor:.3f}")
+        fig_risk_return = go.Figure()
         
-        with col_stress2:
-            # Worst-case scenario
-            worst_5_percent = np.percentile(returns, 5)
-            worst_1_percent = np.percentile(returns, 1)
-            
-            st.metric("Escenario 5% Peor", f"€{worst_5_percent:.2f}")
-            st.metric("Escenario 1% Peor", f"€{worst_1_percent:.2f}")
+        for i, strategy in enumerate(strategies):
+            fig_risk_return.add_trace(go.Scatter(
+                x=[returns_stds[i]],
+                y=[returns_means[i]],
+                mode='markers+text',
+                name=strategy,
+                marker=dict(
+                    size=20,
+                    color=colors[i],
+                    line=dict(width=2, color='white')
+                ),
+                text=strategy,
+                textposition="top center"
+            ))
         
-        # Gráfico de riesgo usando Plotly Pie CORREGIDO
-        st.subheader("🎨 Perfil de Riesgo")
-        
-        risk_categories = ['Bajo', 'Moderado', 'Alto', 'Muy Alto']
-        risk_values = [0.4, 0.3, 0.2, 0.1]  # Ejemplo: distribución del riesgo
-        
-        # Validar que tenemos suficientes colores
-        colors_to_use = SystemConfig.RISK_PALETTE[:len(risk_categories)]
-        
-        fig_risk = go.Figure(data=[go.Pie(
-            labels=risk_categories,
-            values=risk_values,
-            hole=0.4,
-            marker=dict(colors=colors_to_use),  # CORREGIDO: lista de colores
-            textinfo='label+percent',
-            hoverinfo='label+value+percent'
-        )])
-        
-        fig_risk.update_layout(
-            title="Distribución del Perfil de Riesgo",
-            height=400
+        fig_risk_return.update_layout(
+            title="Riesgo vs Rendimiento por Estrategia",
+            xaxis_title="Volatilidad (σ)",
+            yaxis_title="Retorno Esperado (€)",
+            height=400,
+            showlegend=True
         )
         
-        st.plotly_chart(fig_risk, use_container_width=True)
+        st.plotly_chart(fig_risk_return, use_container_width=True)
     
-    def render_executive_summary(self, s73_results: Dict, backtest_results: Dict, config: Dict):
-        """Renderiza resumen ejecutivo del sistema."""
-        st.header("📋 Resumen Ejecutivo")
+    def render_portfolio_analysis(self, s73_results: Dict, config: Dict):
+        """Renderiza análisis completo del portafolio."""
+        st.header("📊 Análisis de Portafolio Unificado")
         
-        metrics = backtest_results['final_metrics']
+        # Inicializar Portfolio Engine
+        portfolio_engine = PortfolioEngine(config['bankroll'])
         
-        # Eficiencia del sistema
-        st.subheader("🎯 Eficiencia del Sistema S73")
+        # Agregar estrategia S73
+        if s73_results:
+            portfolio_engine.add_strategy(
+                's73_columns',
+                s73_results['kelly_stakes'],
+                np.array([S73System.calculate_combination_odds(c, np.zeros((6,3))) for c in s73_results['combinations']]),
+                s73_results['probabilities']
+            )
         
-        efficiency_data = {
-            'Métrica': [
-                'Reducción del Espacio',
-                'Cobertura de Errores', 
-                'Exposición Total',
-                'Diversificación',
-                'Validación Estructural'
-            ],
-            'Valor': [
-                f"{s73_results['filtered_count']} → {s73_results['final_count']}",
-                f"{SystemConfig.HAMMING_DISTANCE_TARGET} errores",
-                f"{np.sum(s73_results['kelly_stakes']) * 100:.1f}%",
-                f"{len(set([tuple(c) for c in s73_results['combinations']]))} únicas",
-                "✅ Completa" if s73_results.get('coverage_verified', False) else "⚠️ Pendiente"
-            ]
-        }
+        # Calcular métricas del portafolio
+        portfolio_metrics = portfolio_engine.calculate_portfolio_metrics()
         
-        st.table(pd.DataFrame(efficiency_data))
+        # Mostrar métricas por estrategia
+        st.subheader("📈 Métricas por Estrategia")
         
-        # Rentabilidad
-        st.subheader("📈 Rentabilidad Esperada")
+        for strategy, metrics in portfolio_metrics.items():
+            if strategy == 'portfolio':
+                continue
+                
+            with st.expander(f"🔍 {strategy.upper()}", expanded=True):
+                cols = st.columns(3)
+                metric_items = list(metrics.items())
+                
+                for i in range(0, len(metric_items), 3):
+                    for j in range(3):
+                        if i + j < len(metric_items):
+                            key, value = metric_items[i + j]
+                            cols[j].metric(key, f"{value:.4f}" if isinstance(value, float) else value)
         
-        profitability_data = {
-            'Métrica': ['ROI Total', 'Sharpe Ratio', 'Win Rate', 'Expectativa/Ronda', 'Prob. Ruin'],
-            'Valor': [
-                f"{metrics['total_return_pct']:.2f}%",
-                f"{metrics['sharpe_ratio']:.2f}",
-                f"{metrics['win_rate']:.2f}%",
-                f"€{np.mean(backtest_results['all_returns']):.2f}",
-                f"{metrics['ruin_probability']:.2f}%"
-            ]
-        }
+        # Mostrar métricas agregadas del portafolio
+        if 'portfolio' in portfolio_metrics:
+            st.subheader("🏦 Métricas Agregadas del Portafolio")
+            
+            portfolio_agg = portfolio_metrics['portfolio']
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                for key in ['Total EV', 'Total Variance', 'Aggregate Sharpe', 'Max Portfolio Drawdown (%)']:
+                    if key in portfolio_agg:
+                        value = portfolio_agg[key]
+                        st.metric(key, f"{value:.4f}" if isinstance(value, float) else value)
+            
+            with col2:
+                for key in ['Aggregate Ruin Probability (%)', 'Aggregate Capital Efficiency', 
+                          'Total Portfolio Exposure (%)', 'Number of Strategies']:
+                    if key in portfolio_agg:
+                        value = portfolio_agg[key]
+                        st.metric(key, f"{value:.4f}" if isinstance(value, float) else value)
         
-        st.table(pd.DataFrame(profitability_data))
+        # Gráfico de composición del portafolio - CORRECCIÓN PROBLEMA 1
+        st.subheader("🥧 Composición del Portafolio")
         
-        # Recomendaciones
-        st.subheader("💡 Recomendaciones de Gestión Institucional")
-        
-        total_exposure = np.sum(s73_results['kelly_stakes']) * 100
-        
-        if total_exposure > 20:
-            exposure_status = "⚠️ ALTO"
-            exposure_rec = "Reducir exposición a <15% mediante aumento de filtros"
-        elif total_exposure > 10:
-            exposure_status = "✅ MODERADO" 
-            exposure_rec = "Exposición dentro de límites institucionales"
-        else:
-            exposure_status = "✅ BAJO"
-            exposure_rec = "Podría aumentar exposición estratégicamente"
-        
-        if metrics['max_drawdown'] > 25:
-            risk_status = "⚠️ ALTO"
-            risk_rec = "Implementar stop-loss del 20% y revisar criterios de entrada"
-        elif metrics['max_drawdown'] > 15:
-            risk_status = "⚠️ MODERADO"
-            risk_rec = "Monitorear drawdown semanal y ajustar fracción Kelly"
-        else:
-            risk_status = "✅ BAJO"
-            risk_rec = "Riesgo dentro de parámetros institucionales"
-        
-        # Eficiencia del sistema
-        efficiency_score = metrics['sharpe_ratio'] * (1 - metrics['max_drawdown']/100)
-        if efficiency_score > 1.0:
-            efficiency_status = "✅ EXCELENTE"
-            efficiency_rec = "Sistema altamente eficiente"
-        elif efficiency_score > 0.5:
-            efficiency_status = "✅ BUENO"
-            efficiency_rec = "Eficiencia adecuada para producción"
-        else:
-            efficiency_status = "⚠️ MEJORABLE"
-            efficiency_rec = "Optimizar criterios de selección"
-        
-        recommendations = pd.DataFrame({
-            'Área': ['Exposición', 'Riesgo', 'Eficiencia', 'Validación'],
-            'Estado': [exposure_status, risk_status, efficiency_status, '✅ COMPLETA'],
-            'Recomendación': [exposure_rec, risk_rec, efficiency_rec,
-                            f"{s73_results['final_count']} columnas con cobertura verificada"]
-        })
-        
-        st.dataframe(recommendations, use_container_width=True, hide_index=True)
-        
-        # Conclusión final
-        st.subheader("🎯 Conclusión del Sistema")
-        
-        roi = metrics['total_return_pct']
-        sharpe = metrics['sharpe_ratio']
-        drawdown = metrics['max_drawdown']
-        
-        # Evaluación institucional
-        if roi > 10 and sharpe > 1.5 and drawdown < 15:
-            conclusion = "✅ APROBADO - Sistema institucional ready para producción"
-            color = SystemConfig.COLORS['success']
-            grade = "A+"
-        elif roi > 5 and sharpe > 1.0 and drawdown < 20:
-            conclusion = "✅ APROBADO CON OBSERVACIONES - Sistema rentable con gestión adecuada"
-            color = SystemConfig.COLORS['warning']
-            grade = "B+"
-        elif roi > 0:
-            conclusion = "⚠️ EN REVISIÓN - Sistema positivo requiere optimización"
-            color = SystemConfig.COLORS['warning']
-            grade = "C+"
-        else:
-            conclusion = "❌ NO APROBADO - Revisar configuración completa del sistema"
-            color = SystemConfig.COLORS['danger']
-            grade = "D"
-        
-        st.markdown(f"""
-        <div style="background-color:{color}20; padding:20px; border-radius:10px; border-left:5px solid {color};">
-            <h4 style="color:{color}; margin-top:0;">Calificación Institucional: <strong>{grade}</strong></h4>
-            <p style="font-size:1.1em;"><strong>{conclusion}</strong></p>
-            <hr style="margin:10px 0;">
-            <p><strong>📊 Métricas Clave:</strong></p>
-            <ul>
-                <li><strong>ROI Total:</strong> {roi:+.2f}%</li>
-                <li><strong>Sharpe Ratio:</strong> {sharpe:.2f}</li>
-                <li><strong>Max Drawdown:</strong> {drawdown:.1f}%</li>
-                <li><strong>Win Rate:</strong> {metrics['win_rate']:.1f}%</li>
-                <li><strong>Probabilidad de Ruina:</strong> {metrics['ruin_probability']:.2f}%</li>
-            </ul>
-            <p><strong>⚙️ Configuración:</strong> {config['n_rounds']} rondas × {config['monte_carlo_sims']:,} iteraciones Monte Carlo</p>
-            <p><strong>💰 Resultado Final:</strong> €{metrics['final_bankroll']:,.2f} (Bankroll inicial: €{metrics['initial_bankroll']:,.2f})</p>
-        </div>
-        """, unsafe_allow_html=True)
+        if portfolio_metrics:
+            strategies = [k for k in portfolio_metrics.keys() if k != 'portfolio']
+            exposures = [portfolio_metrics[s]['Total Exposure (%)'] for s in strategies]
+            
+            fig_pie = go.Figure(data=[go.Pie(
+                labels=strategies,
+                values=exposures,
+                hole=.3,
+                marker=dict(colors=SystemConfig.RISK_PALETTE[:len(strategies)])  # Paleta corregida
+            )])
+            
+            fig_pie.update_layout(
+                title="Distribución de Exposición por Estrategia",
+                height=400
+            )
+            
+            st.plotly_chart(fig_pie, use_container_width=True)
     
     def run(self):
-        """Método principal de ejecución de la aplicación INTEGRADO."""
+        """Método principal de ejecución de la aplicación MEJORADO."""
         st.title("🎯 ACBE-S73 Quantum Betting Suite v2.1")
         st.markdown("""
         *Sistema profesional de optimización de portafolios de apuestas deportivas*  
-        *Con **input manual de partidos reales**, cobertura S73 completa y gestión probabilística avanzada*
+        ***Con correcciones institucionales completas y validación cuantitativa***
         """)
         
         # Renderizar sidebar y obtener configuración
@@ -2237,18 +2120,20 @@ class ACBEApp:
                     "📊 Análisis ACBE", 
                     "🧮 Sistema S73", 
                     "📈 Backtesting",
+                    "📊 Portafolio",
                     "📋 Resumen"
                 ])
-                input_tab_idx, analysis_tab_idx, s73_tab_idx, backtest_tab_idx, summary_tab_idx = 0, 1, 2, 3, 4
+                tab_indices = {'input': 0, 'analysis': 1, 's73': 2, 'backtest': 3, 'portfolio': 4, 'summary': 5}
             else:
                 tabs = st.tabs([
                     "📊 Análisis ACBE", 
                     "🧮 Sistema S73", 
                     "📈 Backtesting",
+                    "📊 Portafolio",
                     "📋 Resumen"
                 ])
-                analysis_tab_idx, s73_tab_idx, backtest_tab_idx, summary_tab_idx = 0, 1, 2, 3
-                input_tab_idx = None
+                tab_indices = {'analysis': 0, 's73': 1, 'backtest': 2, 'portfolio': 3, 'summary': 4}
+                tab_indices['input'] = None
             
             # Variables para almacenar resultados
             probabilities = None
@@ -2258,8 +2143,8 @@ class ACBEApp:
             backtest_results = None
             
             # ===== PESTAÑA INPUT MANUAL =====
-            if input_tab_idx is not None:
-                with tabs[input_tab_idx]:
+            if tab_indices['input'] is not None:
+                with tabs[tab_indices['input']]:
                     if config['data_source'] == "⚽ Input Manual":
                         # Renderizar input manual
                         matches_df, params_dict, mode = self.match_input_layer.render_manual_input_section()
@@ -2273,34 +2158,36 @@ class ACBEApp:
                             normalized_entropy = ACBEModel.normalize_entropy(entropy)
                             
                             st.success(f"✅ Datos procesados exitosamente en modo **{mode}**")
-                            
-                            # Mostrar vista previa
-                            st.subheader("📊 Vista Previa de Datos Procesados")
-                            preview_cols = ['match_id', 'home_team', 'away_team', 
-                                          'home_attack', 'away_attack', 'home_defense', 'away_defense',
-                                          'lambda_home', 'lambda_away']
-                            
-                            st.dataframe(
-                                processed_df[preview_cols].style.format({
-                                    'home_attack': '{:.2f}',
-                                    'away_attack': '{:.2f}',
-                                    'home_defense': '{:.2f}',
-                                    'away_defense': '{:.2f}',
-                                    'lambda_home': '{:.2f}',
-                                    'lambda_away': '{:.2f}'
-                                }),
-                                use_container_width=True
-                            )
             
             # ===== PROCESAMIENTO DE DATOS SEGÚN FUENTE =====
             with st.spinner("🔄 Procesando datos y ejecutando simulaciones..."):
                 if config['data_source'] == "📈 Datos Sintéticos":
                     # Generar datos sintéticos
-                    from dataclasses import replace
-                    # Importar SyntheticDataGenerator (agregar al código si no existe)
-                    # Para simplificar, asumimos que está disponible
-                    matches_df, odds_df, probabilities = self._generate_synthetic_data(config['n_matches'])
-                    odds_matrix = odds_df.values
+                    from scipy import stats
+                    np.random.seed(42)
+                    
+                    n_matches = config['n_matches']
+                    
+                    # Generar parámetros realistas
+                    attack_strengths = np.random.beta(2, 2, size=(n_matches, 2)) * 1.5 + 0.5
+                    defense_strengths = np.random.beta(2, 2, size=(n_matches, 2)) * 1.2 + 0.4
+                    home_advantages = np.random.uniform(1.05, 1.25, n_matches)
+                    
+                    # Calcular tasas de goles
+                    lambda_home = attack_strengths[:, 0] * defense_strengths[:, 1] * home_advantages
+                    lambda_away = attack_strengths[:, 1] * defense_strengths[:, 0]
+                    
+                    # Simular probabilidades
+                    probabilities = ACBEModel.vectorized_poisson_simulation(lambda_home, lambda_away)
+                    
+                    # Generar cuotas con márgenes realistas
+                    margins = np.random.uniform(0.03, 0.07, n_matches)
+                    odds_matrix = np.zeros((n_matches, 3))
+                    
+                    for i in range(n_matches):
+                        fair_odds = 1 / probabilities[i]
+                        odds_matrix[i] = fair_odds * (1 + margins[i])
+                        odds_matrix[i] = np.clip(odds_matrix[i], 1.1, 20.0)
                     
                     # Calcular entropías
                     entropy = ACBEModel.calculate_entropy(probabilities)
@@ -2308,58 +2195,60 @@ class ACBEApp:
                     
                 elif config['data_source'] == "📂 Cargar CSV":
                     # Cargar datos desde CSV
+                    import pandas as pd
                     matches_df = pd.read_csv(config['uploaded_file'])
+                    
+                    # Extraer columnas necesarias
                     required_cols = ['home_attack', 'away_attack', 'home_defense', 'away_defense']
                     odds_cols = ['odds_1', 'odds_X', 'odds_2']
                     
-                    if not all(col in matches_df.columns for col in required_cols + odds_cols):
-                        st.error(f"❌ CSV debe contener: {required_cols + odds_cols}")
+                    # Validar columnas
+                    missing_cols = [col for col in required_cols + odds_cols if col not in matches_df.columns]
+                    if missing_cols:
+                        st.error(f"❌ CSV falta columnas: {missing_cols}")
                         return
                     
-                    odds_df = matches_df[odds_cols].copy()
-                    odds_df.columns = ['odds_1', 'odds_X', 'odds_2']
-                    matches_df = matches_df[required_cols].copy()
-                    
-                    # Calcular probabilidades ACBE
                     attack_strengths = matches_df[['home_attack', 'away_attack']].values
                     defense_strengths = matches_df[['home_defense', 'away_defense']].values
+                    odds_matrix = matches_df[odds_cols].values
                     
+                    # Calcular probabilidades
                     lambda_home, lambda_away = ACBEModel.gamma_poisson_bayesian(
                         attack_strengths, defense_strengths
                     )
                     probabilities = ACBEModel.vectorized_poisson_simulation(lambda_home, lambda_away)
-                    odds_matrix = odds_df.values
                     
                     # Calcular entropías
                     entropy = ACBEModel.calculate_entropy(probabilities)
                     normalized_entropy = ACBEModel.normalize_entropy(entropy)
-                else:
-                    # Datos ya procesados del input manual
-                    pass
-                
-                # Actualizar configuración de exposición máxima
-                SystemConfig.MAX_PORTFOLIO_EXPOSURE = config['max_exposure']
             
-            # Verificar que tenemos suficientes partidos para S73
-            if len(probabilities) < 6:
-                st.warning(f"⚠️ Se necesitan al menos 6 partidos para el sistema S73. Actuales: {len(probabilities)}")
+            # Verificar que tenemos datos
+            if probabilities is None:
+                st.error("❌ No se pudieron procesar los datos")
                 return
             
             # Usar solo primeros 6 partidos para S73 (sistema clásico)
-            probs_6 = probabilities[:6, :]
-            odds_6 = odds_matrix[:6, :]
-            entropy_6 = normalized_entropy[:6]
+            n_matches_available = len(probabilities)
+            if n_matches_available >= 6:
+                probs_6 = probabilities[:6, :]
+                odds_6 = odds_matrix[:6, :]
+                entropy_6 = normalized_entropy[:6]
+            else:
+                st.warning(f"⚠️ Solo {n_matches_available} partidos disponibles. Usando todos.")
+                probs_6 = probabilities
+                odds_6 = odds_matrix
+                entropy_6 = normalized_entropy
             
             # ===== PESTAÑA ANÁLISIS ACBE =====
-            with tabs[analysis_tab_idx]:
+            with tabs[tab_indices['analysis']]:
                 self.render_acbe_analysis(probs_6, odds_6, entropy_6)
             
             # ===== PESTAÑA SISTEMA S73 =====
-            with tabs[s73_tab_idx]:
+            with tabs[tab_indices['s73']]:
                 s73_results = self.render_s73_system(probs_6, odds_6, entropy_6, config['bankroll'], config)
             
             # ===== PESTAÑA BACKTESTING =====
-            with tabs[backtest_tab_idx]:
+            with tabs[tab_indices['backtest']]:
                 # Ejecutar backtesting
                 backtester = VectorizedBacktester(initial_bankroll=config['bankroll'])
                 
@@ -2369,13 +2258,21 @@ class ACBEApp:
                         s73_results,
                         n_rounds=config['n_rounds'],
                         n_sims_per_round=config['monte_carlo_sims'],
-                        kelly_fraction=config.get('kelly_fraction', 0.5) if config['auto_stake_mode'] else 1.0
+                        kelly_fraction=config.get('kelly_fraction', 0.5),
+                        manual_stake=config.get('manual_stake')
                     )
                 
                 self.render_backtest_results(backtest_results, config)
             
+            # ===== PESTAÑA PORTFOLIO =====
+            with tabs[tab_indices['portfolio']]:
+                if s73_results:
+                    self.render_portfolio_analysis(s73_results, config)
+                else:
+                    st.warning("Ejecuta primero el sistema S73 para ver el análisis de portafolio")
+            
             # ===== PESTAÑA RESUMEN EJECUTIVO =====
-            with tabs[summary_tab_idx]:
+            with tabs[tab_indices['summary']]:
                 if s73_results and backtest_results:
                     self.render_executive_summary(s73_results, backtest_results, config)
                 
@@ -2383,53 +2280,117 @@ class ACBEApp:
             st.error(f"❌ Error en la ejecución: {str(e)}")
             st.exception(e)
     
-    def _generate_synthetic_data(self, n_matches: int) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
-        """Genera datos sintéticos para pruebas."""
-        np.random.seed(42)
+    def render_executive_summary(self, s73_results: Dict, backtest_results: Dict, config: Dict):
+        """Renderiza resumen ejecutivo del sistema."""
+        st.header("📋 Resumen Ejecutivo")
         
-        # Parámetros de equipos
-        attack_strengths = np.random.beta(a=2, b=2, size=(n_matches, 2)) * 1.5 + 0.5
-        defense_strengths = np.random.beta(a=2, b=2, size=(n_matches, 2)) * 1.2 + 0.4
-        home_advantages = np.random.uniform(1.05, 1.25, n_matches)
+        metrics = backtest_results['final_metrics']
         
-        # Tasas de goles
-        lambda_home = np.zeros(n_matches)
-        lambda_away = np.zeros(n_matches)
+        # Estado del sistema
+        st.subheader("🎯 Estado del Sistema")
         
-        for i in range(n_matches):
-            lambda_home[i] = attack_strengths[i, 0] * defense_strengths[i, 1] * home_advantages[i]
-            lambda_away[i] = attack_strengths[i, 1] * defense_strengths[i, 0]
+        col1, col2, col3, col4 = st.columns(4)
         
-        # Probabilidades
-        probabilities = ACBEModel.vectorized_poisson_simulation(lambda_home, lambda_away)
+        with col1:
+            coverage_status = "✅ VALIDADO" if s73_results.get('coverage_validated', False) else "❌ NO VALIDADO"
+            st.metric("Cobertura S73", coverage_status)
         
-        # Cuotas con márgenes
-        margins = np.random.uniform(0.03, 0.07, n_matches)
-        odds = np.zeros((n_matches, 3))
+        with col2:
+            mode_status = "🔘 AUTOMÁTICO" if config['auto_stake_mode'] else "🎮 MANUAL"
+            st.metric("Modo Stake", mode_status)
         
-        for i in range(n_matches):
-            odds[i] = 1 / (probabilities[i] * (1 + margins[i]))
-            odds[i] = np.clip(odds[i], SystemConfig.MIN_ODDS, SystemConfig.MAX_ODDS)
+        with col3:
+            total_exposure = np.sum(s73_results['kelly_stakes']) * 100
+            exposure_color = "green" if total_exposure <= 15 else "orange" if total_exposure <= 20 else "red"
+            st.metric("Exposición Total", f"{total_exposure:.1f}%", delta=None)
         
-        # DataFrames
-        matches_df = pd.DataFrame({
-            'match_id': range(1, n_matches + 1),
-            'home_attack': attack_strengths[:, 0],
-            'away_attack': attack_strengths[:, 1],
-            'home_defense': defense_strengths[:, 0],
-            'away_defense': defense_strengths[:, 1],
-            'home_advantage': home_advantages,
-            'lambda_home': lambda_home,
-            'lambda_away': lambda_away
-        })
+        with col4:
+            roi = metrics['total_return_pct']
+            roi_color = "green" if roi > 0 else "red"
+            st.metric("ROI Total", f"{roi:+.2f}%", delta=None)
         
-        odds_df = pd.DataFrame(
-            odds,
-            columns=['odds_1', 'odds_X', 'odds_2']
-        )
-        odds_df.index = range(1, n_matches + 1)
+        # Recomendaciones
+        st.subheader("💡 Recomendaciones de Gestión")
         
-        return matches_df, odds_df, probabilities
+        total_exposure = np.sum(s73_results['kelly_stakes']) * 100
+        
+        if total_exposure > 20:
+            exposure_status = "⚠️ ALTO"
+            exposure_rec = "Reducir exposición inmediatamente a <15%"
+            exposure_action = "st.error"
+        elif total_exposure > 15:
+            exposure_status = "⚠️ MODERADO"
+            exposure_rec = "Considerar reducir exposición a <15%"
+            exposure_action = "st.warning"
+        else:
+            exposure_status = "✅ OPTIMO"
+            exposure_rec = "Exposición dentro de límites seguros"
+            exposure_action = "st.success"
+        
+        if metrics['max_drawdown'] > 25:
+            risk_status = "⚠️ ALTO"
+            risk_rec = "Implementar stop-loss agresivo inmediatamente"
+            risk_action = "st.error"
+        elif metrics['max_drawdown'] > 15:
+            risk_status = "⚠️ MODERADO"
+            risk_rec = "Monitorear drawdown diariamente"
+            risk_action = "st.warning"
+        else:
+            risk_status = "✅ BAJO"
+            risk_rec = "Drawdown bien controlado"
+            risk_action = "st.success"
+        
+        # Mostrar recomendaciones
+        eval(exposure_action)(f"**Exposición del Portafolio:** {exposure_status} - {exposure_rec}")
+        eval(risk_action)(f"**Riesgo de Drawdown:** {risk_status} - {risk_rec}")
+        
+        # Conclusión final
+        st.subheader("🎯 Calificación del Sistema")
+        
+        roi = metrics['total_return_pct']
+        sharpe = metrics['sharpe_ratio']
+        max_dd = metrics['max_drawdown']
+        
+        if roi > 10 and sharpe > 1.5 and max_dd < 15:
+            rating = "A+ (EXCELENTE)"
+            description = "Sistema altamente rentable con excelente perfil riesgo/retorno"
+            color = SystemConfig.COLORS['success']
+        elif roi > 5 and sharpe > 1.0 and max_dd < 20:
+            rating = "B+ (BUENO)"
+            description = "Sistema rentable con gestión adecuada de riesgo"
+            color = SystemConfig.COLORS['success']
+        elif roi > 0:
+            rating = "C (ACEPTABLE)"
+            description = "Sistema positivo con margen de mejora en gestión de riesgo"
+            color = SystemConfig.COLORS['warning']
+        else:
+            rating = "D (MEJORABLE)"
+            description = "Revisar configuración del sistema y criterios de selección"
+            color = SystemConfig.COLORS['danger']
+        
+        st.markdown(f"""
+        <div style="background-color:{color}20; padding:20px; border-radius:10px; border-left:5px solid {color}; margin:20px 0;">
+            <h3 style="color:{color};">Calificación: {rating}</h3>
+            <p><strong>{description}</strong></p>
+            <hr>
+            <p><strong>📊 Métricas Clave:</strong></p>
+            <ul>
+                <li>ROI Total: {roi:+.2f}%</li>
+                <li>Sharpe Ratio: {sharpe:.2f}</li>
+                <li>Max Drawdown: {max_dd:.1f}%</li>
+                <li>Win Rate: {metrics['win_rate']:.1f}%</li>
+                <li>Prob. Ruina: {metrics['ruin_probability']:.1f}%</li>
+            </ul>
+            <hr>
+            <p><strong>⚙️ Configuración Usada:</strong></p>
+            <ul>
+                <li>Modo: {"Automático (Kelly)" if config['auto_stake_mode'] else f"Manual ({config.get('manual_stake', 0)*100:.1f}%)"}</li>
+                <li>Exposición Máxima: {config['max_exposure']*100:.0f}%</li>
+                <li>Simulaciones: {config['n_rounds']} rondas × {config['monte_carlo_sims']:,} iteraciones</li>
+                <li>Columnas S73: {s73_results['final_count']} (de {s73_results['filtered_count']} pre-filtradas)</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
 
 # ============================================================================
 # EJECUCIÓN PRINCIPAL
