@@ -1,3 +1,4 @@
+"""
 🎯 ACBE-S73 QUANTUM BETTING SUITE v3.0
 Sistema profesional de optimización de portafolios de apuestas deportivas
 Combina Inferencia Bayesiana Gamma-Poisson, Teoría de la Información y Criterio de Kelly
