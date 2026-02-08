@@ -3,6 +3,8 @@
 Sistema profesional de optimización de portafolios de apuestas deportivas
 Combina Inferencia Bayesiana Gamma-Poisson, Teoría de la Información y Criterio de Kelly
 Con cobertura S73 completa (2 errores) y gestión probabilística avanzada
+
+NOVEDAD v2.1: Input Layer profesional para partidos reales con modos Automático/Manual
 Autor: Arquitecto de Software & Data Scientist Senior
 """
 
@@ -12,7 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import warnings
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Any
 warnings.filterwarnings('ignore')
 
 # ============================================================================
@@ -67,9 +69,362 @@ class SystemConfig:
     OUTCOME_MAPPING = {'1': 0, 'X': 1, '2': 2}
     OUTCOME_LABELS = ['1', 'X', '2']
     OUTCOME_COLORS = ['#1E88E5', '#FF9800', '#F44336']
+    
+    # Parámetros input manual
+    MANUAL_INPUT_DEFAULTS = {
+        'min_odds': 1.01,
+        'max_odds': 100.0,
+        'default_attack': 1.2,
+        'default_defense': 0.8,
+        'default_home_advantage': 1.1,
+        'min_attack': 0.5,
+        'max_attack': 2.0,
+        'min_defense': 0.5,
+        'max_defense': 2.0,
+        'min_home_advantage': 1.0,
+        'max_home_advantage': 1.5
+    }
 
 # ============================================================================
-# SECCIÓN 2: MODELO MATEMÁTICO ACBE (VECTORIZADO)
+# SECCIÓN 2: CAPA DE INPUT PROFESIONAL PARA PARTIDOS REALES
+# ============================================================================
+
+class MatchInputLayer:
+    """Capa de input profesional para partidos reales con validaciones avanzadas."""
+    
+    @staticmethod
+    def validate_odds(odds_array: np.ndarray) -> np.ndarray:
+        """
+        Valida y normaliza cuotas ingresadas por el usuario.
+        
+        Args:
+            odds_array: Array (n, 3) con cuotas [1, X, 2]
+            
+        Returns:
+            Array validado y normalizado
+        """
+        # Validar valores nulos
+        if np.any(np.isnan(odds_array)):
+            st.warning("⚠️ Algunas cuotas tienen valores inválidos. Usando defaults...")
+            return np.full_like(odds_array, 2.0)
+        
+        # Validar cuotas mínimas
+        if np.any(odds_array <= SystemConfig.MIN_ODDS):
+            st.warning(f"⚠️ Algunas cuotas son menores a {SystemConfig.MIN_ODDS}. Ajustando...")
+            odds_array = np.maximum(odds_array, SystemConfig.MIN_ODDS + 0.01)
+        
+        # Validar cuotas máximas
+        if np.any(odds_array > SystemConfig.MAX_ODDS):
+            st.warning(f"⚠️ Algunas cuotas superan {SystemConfig.MAX_ODDS}. Ajustando...")
+            odds_array = np.minimum(odds_array, SystemConfig.MAX_ODDS)
+        
+        # Validar orden lógico (mayor cuota = menor probabilidad)
+        for i in range(len(odds_array)):
+            if odds_array[i, 0] < odds_array[i, 2]:  # Cuota 1 menor que 2
+                if odds_array[i, 0] < 1.5:  # Si es muy baja, probablemente error
+                    odds_array[i, 0] = odds_array[i, 2] * 0.8  # Ajustar proporcionalmente
+        
+        return odds_array
+    
+    @staticmethod
+    def render_manual_input_section() -> Tuple[pd.DataFrame, Dict, str]:
+        """
+        Renderiza la sección de input manual para partidos reales.
+        
+        Returns:
+            matches_df: DataFrame con datos de partidos
+            odds_matrix: Array (6, 3) de cuotas
+            mode: Modo seleccionado ('auto' o 'manual')
+        """
+        st.header("⚽ Input Manual de Partidos Reales")
+        
+        # Selector de modo
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("🎯 Modo de Operación")
+            mode = st.radio(
+                "Selecciona el modo de análisis:",
+                ["🔘 Modo Automático", "🎮 Modo Manual"],
+                horizontal=True
+            )
+        
+        is_manual_mode = mode == "🎮 Modo Manual"
+        
+        # Información del sistema
+        with col2:
+            st.subheader("📋 Instrucciones")
+            st.info(
+                "💡 **Requerimientos:**\n"
+                "1. Ingresa exactamente 6 partidos\n"
+                "2. Cuotas mayores a 1.01\n"
+                "3. Liga y equipos para referencia\n\n"
+                "⚙️ **Opcional:** Ajusta fuerzas en modo manual"
+            )
+        
+        # Contenedor principal de input
+        matches_data = []
+        attack_strengths = []
+        defense_strengths = []
+        home_advantages = []
+        
+        # Crear 6 partidos (sistema S73 clásico)
+        st.subheader(f"📝 Ingreso de {SystemConfig.NUM_MATCHES} Partidos")
+        
+        for match_idx in range(1, SystemConfig.NUM_MATCHES + 1):
+            st.markdown(f"### Partido {match_idx}")
+            
+            # Contenedor para cada partido
+            col_a, col_b, col_c = st.columns([2, 2, 3])
+            
+            with col_a:
+                league = st.text_input(
+                    f"Liga/Competición {match_idx}",
+                    value=f"Liga {match_idx}",
+                    key=f"league_{match_idx}"
+                )
+                home_team = st.text_input(
+                    f"Equipo Local {match_idx}",
+                    value=f"Local {match_idx}",
+                    key=f"home_{match_idx}"
+                )
+                away_team = st.text_input(
+                    f"Equipo Visitante {match_idx}",
+                    value=f"Visitante {match_idx}",
+                    key=f"away_{match_idx}"
+                )
+            
+            with col_b:
+                # Input de cuotas con validación
+                odds_1 = st.number_input(
+                    f"Cuota 1 - {home_team}",
+                    min_value=1.01,
+                    max_value=100.0,
+                    value=2.0,
+                    step=0.1,
+                    key=f"odds1_{match_idx}"
+                )
+                odds_x = st.number_input(
+                    f"Cuota X - Empate",
+                    min_value=1.01,
+                    max_value=100.0,
+                    value=3.0,
+                    step=0.1,
+                    key=f"oddsx_{match_idx}"
+                )
+                odds_2 = st.number_input(
+                    f"Cuota 2 - {away_team}",
+                    min_value=1.01,
+                    max_value=100.0,
+                    value=2.5,
+                    step=0.1,
+                    key=f"odds2_{match_idx}"
+                )
+            
+            with col_c:
+                if is_manual_mode:
+                    # Expander para parámetros avanzados
+                    with st.expander("⚙️ Ajustes Avanzados", expanded=False):
+                        st.markdown("**Fuerzas Relativas (default ≈ 1.0)**")
+                        
+                        # Sliders para fuerzas
+                        home_attack = st.slider(
+                            f"Ataque {home_team}",
+                            min_value=0.5,
+                            max_value=2.0,
+                            value=SystemConfig.DEFAULT_ATTACK_MEAN,
+                            step=0.1,
+                            key=f"ha_{match_idx}"
+                        )
+                        home_defense = st.slider(
+                            f"Defensa {home_team}",
+                            min_value=0.5,
+                            max_value=2.0,
+                            value=SystemConfig.DEFAULT_DEFENSE_MEAN,
+                            step=0.1,
+                            key=f"hd_{match_idx}"
+                        )
+                        away_attack = st.slider(
+                            f"Ataque {away_team}",
+                            min_value=0.5,
+                            max_value=2.0,
+                            value=SystemConfig.DEFAULT_ATTACK_MEAN,
+                            step=0.1,
+                            key=f"aa_{match_idx}"
+                        )
+                        away_defense = st.slider(
+                            f"Defensa {away_team}",
+                            min_value=0.5,
+                            max_value=2.0,
+                            value=SystemConfig.DEFAULT_DEFENSE_MEAN,
+                            step=0.1,
+                            key=f"ad_{match_idx}"
+                        )
+                        home_advantage = st.slider(
+                            f"Ventaja Local",
+                            min_value=1.0,
+                            max_value=1.5,
+                            value=SystemConfig.DEFAULT_HOME_ADVANTAGE,
+                            step=0.01,
+                            key=f"adv_{match_idx}"
+                        )
+                else:
+                    # Valores por defecto para modo automático
+                    home_attack = SystemConfig.DEFAULT_ATTACK_MEAN
+                    home_defense = SystemConfig.DEFAULT_DEFENSE_MEAN
+                    away_attack = SystemConfig.DEFAULT_ATTACK_MEAN
+                    away_defense = SystemConfig.DEFAULT_DEFENSE_MEAN
+                    home_advantage = SystemConfig.DEFAULT_HOME_ADVANTAGE
+                    
+                    st.info(
+                        "🔘 **Modo Automático**\n\n"
+                        "Fuerzas estimadas automáticamente:\n"
+                        f"- Ataque: {home_attack:.1f} / {away_attack:.1f}\n"
+                        f"- Defensa: {home_defense:.1f} / {away_defense:.1f}\n"
+                        f"- Ventaja local: {home_advantage:.1f}"
+                    )
+            
+            # Calcular margen implícito
+            implied_prob = (1/odds_1 + 1/odds_x + 1/odds_2)
+            margin = (implied_prob - 1) * 100
+            
+            # Almacenar datos del partido
+            matches_data.append({
+                'match_id': match_idx,
+                'league': league,
+                'home_team': home_team,
+                'away_team': away_team,
+                'home_attack': home_attack,
+                'away_attack': away_attack,
+                'home_defense': home_defense,
+                'away_defense': away_defense,
+                'home_advantage': home_advantage,
+                'odds_1': odds_1,
+                'odds_X': odds_x,
+                'odds_2': odds_2,
+                'implied_prob': implied_prob,
+                'margin': margin,
+                'mode': 'Manual' if is_manual_mode else 'Auto'
+            })
+            
+            attack_strengths.append([home_attack, away_attack])
+            defense_strengths.append([home_defense, away_defense])
+            home_advantages.append(home_advantage)
+            
+            st.markdown("---")
+        
+        # Crear DataFrames y matrices
+        matches_df = pd.DataFrame(matches_data)
+        
+        # Extraer matriz de cuotas
+        odds_matrix = matches_df[['odds_1', 'odds_X', 'odds_2']].values
+        odds_matrix = MatchInputLayer.validate_odds(odds_matrix)
+        
+        # Crear diccionario con todos los parámetros
+        params_dict = {
+            'attack_strengths': np.array(attack_strengths),
+            'defense_strengths': np.array(defense_strengths),
+            'home_advantages': np.array(home_advantages),
+            'matches_df': matches_df,
+            'odds_matrix': odds_matrix,
+            'mode': 'manual' if is_manual_mode else 'auto'
+        }
+        
+        # Resumen del input
+        MatchInputLayer._render_input_summary(matches_df, params_dict)
+        
+        return matches_df, params_dict, 'manual' if is_manual_mode else 'auto'
+    
+    @staticmethod
+    def _render_input_summary(matches_df: pd.DataFrame, params_dict: Dict):
+        """Renderiza resumen del input ingresado."""
+        st.subheader("📋 Resumen del Input")
+        
+        # Métricas clave
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            avg_margin = matches_df['margin'].mean()
+            st.metric("Margen Promedio", f"{avg_margin:.2f}%")
+        
+        with col2:
+            avg_odds = matches_df[['odds_1', 'odds_X', 'odds_2']].values.mean()
+            st.metric("Cuota Promedio", f"{avg_odds:.2f}")
+        
+        with col3:
+            total_combinations = 3 ** len(matches_df)
+            st.metric("Combinaciones Totales", f"{total_combinations:,}")
+        
+        with col4:
+            mode = params_dict['mode']
+            st.metric("Modo", "🎮 Manual" if mode == 'manual' else "🔘 Automático")
+        
+        # Tabla resumen
+        display_df = matches_df.copy()
+        display_df = display_df[[
+            'match_id', 'league', 'home_team', 'away_team',
+            'odds_1', 'odds_X', 'odds_2', 'margin'
+        ]]
+        
+        # Formatear para visualización
+        def format_margin(val):
+            color = 'red' if val > 7 else 'orange' if val > 5 else 'green'
+            return f'<span style="color:{color}">{val:.2f}%</span>'
+        
+        st.dataframe(
+            display_df.style.format({
+                'odds_1': '{:.2f}',
+                'odds_X': '{:.2f}',
+                'odds_2': '{:.2f}',
+                'margin': '{:.2f}%'
+            }).applymap(
+                lambda x: format_margin(x) if isinstance(x, (int, float)) else x,
+                subset=['margin']
+            ),
+            use_container_width=True,
+            height=300
+        )
+    
+    @staticmethod
+    def process_manual_input(params_dict: Dict) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray]:
+        """
+        Procesa input manual para alimentar el pipeline ACBE.
+        
+        Args:
+            params_dict: Diccionario con parámetros ingresados
+            
+        Returns:
+            matches_df, odds_matrix, probabilities
+        """
+        # Extraer parámetros
+        attack_strengths = params_dict['attack_strengths']
+        defense_strengths = params_dict['defense_strengths']
+        home_advantages = params_dict['home_advantages']
+        odds_matrix = params_dict['odds_matrix']
+        matches_df = params_dict['matches_df']
+        
+        # Calcular tasas de goles con ventajas específicas por partido
+        n_matches = len(attack_strengths)
+        lambda_home = np.zeros(n_matches)
+        lambda_away = np.zeros(n_matches)
+        
+        for i in range(n_matches):
+            lambda_home[i] = attack_strengths[i, 0] * defense_strengths[i, 1] * home_advantages[i]
+            lambda_away[i] = attack_strengths[i, 1] * defense_strengths[i, 0]
+        
+        # Simular probabilidades ACBE
+        probabilities = ACBEModel.vectorized_poisson_simulation(lambda_home, lambda_away)
+        
+        # Agregar columnas calculadas al DataFrame
+        matches_df['lambda_home'] = lambda_home
+        matches_df['lambda_away'] = lambda_away
+        matches_df['implied_prob_1'] = 1 / odds_matrix[:, 0]
+        matches_df['implied_prob_X'] = 1 / odds_matrix[:, 1]
+        matches_df['implied_prob_2'] = 1 / odds_matrix[:, 2]
+        
+        return matches_df, odds_matrix, probabilities
+
+# ============================================================================
+# SECCIÓN 3: MODELO MATEMÁTICO ACBE (VECTORIZADO)
 # ============================================================================
 
 class ACBEModel:
@@ -197,7 +552,7 @@ class ACBEModel:
         return (entropy - np.min(entropy)) / (np.max(entropy) - np.min(entropy))
 
 # ============================================================================
-# SECCIÓN 3: TEORÍA DE LA INFORMACIÓN Y CLASIFICACIÓN PROBABILÍSTICA
+# SECCIÓN 4: TEORÍA DE LA INFORMACIÓN Y CLASIFICACIÓN PROBABILÍSTICA
 # ============================================================================
 
 class InformationTheory:
@@ -266,7 +621,7 @@ class InformationTheory:
         return probabilities * odds_matrix - 1
 
 # ============================================================================
-# SECCIÓN 4: SISTEMA COMBINATORIO S73 (COBERTURA DE 2 ERRORES)
+# SECCIÓN 5: SISTEMA COMBINATORIO S73 (COBERTURA DE 2 ERRORES)
 # ============================================================================
 
 class S73System:
@@ -439,7 +794,7 @@ class S73System:
         return np.prod(selected_odds)
 
 # ============================================================================
-# SECCIÓN 5: CRITERIO DE KELLY INTEGRADO Y GESTIÓN DE CAPITAL
+# SECCIÓN 6: CRITERIO DE KELLY INTEGRADO Y GESTIÓN DE CAPITAL
 # ============================================================================
 
 class KellyCapitalManagement:
@@ -533,7 +888,7 @@ class KellyCapitalManagement:
         return stakes_array
 
 # ============================================================================
-# SECCIÓN 6: MOTOR DE BACKTESTING VECTORIZADO
+# SECCIÓN 7: MOTOR DE BACKTESTING VECTORIZADO
 # ============================================================================
 
 class VectorizedBacktester:
@@ -774,7 +1129,7 @@ class VectorizedBacktester:
         }
 
 # ============================================================================
-# SECCIÓN 7: GENERADOR DE DATOS SINTÉTICOS
+# SECCIÓN 8: GENERADOR DE DATOS SINTÉTICOS
 # ============================================================================
 
 class SyntheticDataGenerator:
@@ -844,14 +1199,15 @@ class SyntheticDataGenerator:
         return matches_df, odds_df, probabilities
 
 # ============================================================================
-# SECCIÓN 8: INTERFAZ STREAMLIT PROFESIONAL
+# SECCIÓN 9: INTERFAZ STREAMLIT PROFESIONAL COMPLETA
 # ============================================================================
 
 class ACBEApp:
-    """Interfaz principal de la aplicación Streamlit."""
+    """Interfaz principal de la aplicación Streamlit - INTEGRADA CON INPUT MANUAL."""
     
     def __init__(self):
         self.setup_page_config()
+        self.match_input_layer = MatchInputLayer()
     
     def setup_page_config(self):
         """Configuración de la página Streamlit."""
@@ -863,7 +1219,7 @@ class ACBEApp:
         )
     
     def render_sidebar(self) -> Dict:
-        """Renderiza sidebar y retorna configuración del usuario."""
+        """Renderiza sidebar MODIFICADO para incluir input manual."""
         with st.sidebar:
             st.header("⚙️ Configuración del Sistema")
             
@@ -917,15 +1273,22 @@ class ACBEApp:
                 step=10
             )
             
-            # Fuente de datos
+            # ===== NUEVA SELECCIÓN DE FUENTE CON INPUT MANUAL =====
             st.subheader("📊 Fuente de Datos")
             data_source = st.radio(
                 "Seleccionar fuente:",
-                ["Datos Sintéticos", "Cargar CSV"],
-                index=0
+                ["⚽ Input Manual", "📈 Datos Sintéticos", "📂 Cargar CSV"],
+                index=0,
+                help="Input Manual: Ingresa partidos reales manualmente\n"
+                     "Datos Sintéticos: Sistema genera datos de prueba\n"
+                     "Cargar CSV: Sube archivo con datos históricos"
             )
             
-            if data_source == "Datos Sintéticos":
+            generate_btn = False
+            uploaded_file = None
+            n_matches = SystemConfig.NUM_MATCHES
+            
+            if data_source == "📈 Datos Sintéticos":
                 n_matches = st.slider(
                     "Número de partidos",
                     min_value=6,
@@ -934,18 +1297,25 @@ class ACBEApp:
                     step=1
                 )
                 generate_btn = st.button("🚀 Ejecutar Simulación Completa", type="primary")
-            else:
+                
+            elif data_source == "📂 Cargar CSV":
                 uploaded_file = st.file_uploader(
                     "Subir CSV con datos",
                     type=['csv'],
                     help="Columnas requeridas: home_attack, away_attack, home_defense, away_defense, odds_1, odds_X, odds_2"
                 )
                 generate_btn = uploaded_file is not None
+                
+            else:  # ⚽ Input Manual
+                generate_btn = st.button("🎯 Analizar Partidos Ingresados", type="primary")
             
             # Información del sistema
             with st.expander("ℹ️ Acerca del Sistema"):
                 st.markdown("""
-                **ACBE-S73 v2.0 - Características:**
+                **ACBE-S73 v2.0 - Nuevas Características:**
+                - ✅ **Input Manual Profesional** para partidos reales
+                - ✅ **Modos Automático/Manual** para ajuste de fuerzas
+                - ✅ **Validación Inteligente** de cuotas y parámetros
                 - ✅ **Cobertura S73 completa** (2 errores en 6 partidos)
                 - ✅ **Reducción probabilística** por entropía
                 - ✅ **Kelly integrado** por columna y portafolio
@@ -960,8 +1330,8 @@ class ACBEApp:
                 'monte_carlo_sims': monte_carlo_sims,
                 'n_rounds': n_rounds,
                 'data_source': data_source,
-                'n_matches': n_matches if data_source == "Datos Sintéticos" else None,
-                'uploaded_file': uploaded_file if data_source == "Cargar CSV" else None,
+                'n_matches': n_matches,
+                'uploaded_file': uploaded_file,
                 'generate_btn': generate_btn
             }
     
@@ -1430,11 +1800,11 @@ class ACBEApp:
         """, unsafe_allow_html=True)
     
     def run(self):
-        """Método principal de ejecución de la aplicación."""
+        """Método principal de ejecución de la aplicación INTEGRADO."""
         st.title("🎯 ACBE-S73 Quantum Betting Suite v2.0")
         st.markdown("""
         *Sistema profesional de optimización de portafolios de apuestas deportivas*  
-        *Con cobertura S73 completa, gestión probabilística y Kelly integrado*
+        *Con **input manual de partidos reales**, cobertura S73 completa y gestión probabilística avanzada*
         """)
         
         # Renderizar sidebar y obtener configuración
@@ -1446,21 +1816,82 @@ class ACBEApp:
         
         try:
             # Crear pestañas principales
-            tab1, tab2, tab3, tab4 = st.tabs([
-                "📊 Análisis ACBE", 
-                "🧮 Sistema S73", 
-                "📈 Backtesting",
-                "📋 Resumen"
-            ])
+            if config['data_source'] == "⚽ Input Manual":
+                tabs = st.tabs([
+                    "⚽ Input Manual", 
+                    "📊 Análisis ACBE", 
+                    "🧮 Sistema S73", 
+                    "📈 Backtesting",
+                    "📋 Resumen"
+                ])
+                input_tab_idx, analysis_tab_idx, s73_tab_idx, backtest_tab_idx, summary_tab_idx = 0, 1, 2, 3, 4
+            else:
+                tabs = st.tabs([
+                    "📊 Análisis ACBE", 
+                    "🧮 Sistema S73", 
+                    "📈 Backtesting",
+                    "📋 Resumen"
+                ])
+                analysis_tab_idx, s73_tab_idx, backtest_tab_idx, summary_tab_idx = 0, 1, 2, 3
+                input_tab_idx = None
             
+            # Variables para almacenar resultados
+            probabilities = None
+            odds_matrix = None
+            normalized_entropy = None
+            s73_results = None
+            backtest_results = None
+            
+            # ===== PESTAÑA INPUT MANUAL =====
+            if input_tab_idx is not None:
+                with tabs[input_tab_idx]:
+                    if config['data_source'] == "⚽ Input Manual":
+                        # Renderizar input manual
+                        matches_df, params_dict, mode = self.match_input_layer.render_manual_input_section()
+                        
+                        # Procesar input manual
+                        with st.spinner("🔄 Procesando datos ingresados..."):
+                            processed_df, odds_matrix, probabilities = self.match_input_layer.process_manual_input(params_dict)
+                            
+                            # Calcular entropías
+                            entropy = ACBEModel.calculate_entropy(probabilities)
+                            normalized_entropy = ACBEModel.normalize_entropy(entropy)
+                            
+                            st.success(f"✅ Datos procesados exitosamente en modo **{mode}**")
+                            
+                            # Mostrar vista previa
+                            st.subheader("📊 Vista Previa de Datos Procesados")
+                            preview_cols = ['match_id', 'home_team', 'away_team', 
+                                          'home_attack', 'away_attack', 'home_defense', 'away_defense',
+                                          'lambda_home', 'lambda_away']
+                            
+                            st.dataframe(
+                                processed_df[preview_cols].style.format({
+                                    'home_attack': '{:.2f}',
+                                    'away_attack': '{:.2f}',
+                                    'home_defense': '{:.2f}',
+                                    'away_defense': '{:.2f}',
+                                    'lambda_home': '{:.2f}',
+                                    'lambda_away': '{:.2f}'
+                                }),
+                                use_container_width=True
+                            )
+            
+            # ===== PROCESAMIENTO DE DATOS SEGÚN FUENTE =====
             with st.spinner("🔄 Procesando datos y ejecutando simulaciones..."):
-                # Cargar/generar datos
-                if config['data_source'] == "Datos Sintéticos":
+                if config['data_source'] == "📈 Datos Sintéticos":
+                    # Generar datos sintéticos
                     matches_df, odds_df, probabilities = SyntheticDataGenerator.generate_complete_dataset(
                         config['n_matches']
                     )
-                else:
-                    # Cargar CSV personalizado
+                    odds_matrix = odds_df.values
+                    
+                    # Calcular entropías
+                    entropy = ACBEModel.calculate_entropy(probabilities)
+                    normalized_entropy = ACBEModel.normalize_entropy(entropy)
+                    
+                elif config['data_source'] == "📂 Cargar CSV":
+                    # Cargar datos desde CSV
                     matches_df = pd.read_csv(config['uploaded_file'])
                     required_cols = ['home_attack', 'away_attack', 'home_defense', 'away_defense']
                     odds_cols = ['odds_1', 'odds_X', 'odds_2']
@@ -1481,23 +1912,18 @@ class ACBEApp:
                         attack_strengths, defense_strengths
                     )
                     probabilities = ACBEModel.vectorized_poisson_simulation(lambda_home, lambda_away)
-                
-                odds_matrix = odds_df.values
-                
-                # Calcular entropías
-                entropy = ACBEModel.calculate_entropy(probabilities)
-                normalized_entropy = ACBEModel.normalize_entropy(entropy)
+                    odds_matrix = odds_df.values
+                    
+                    # Calcular entropías
+                    entropy = ACBEModel.calculate_entropy(probabilities)
+                    normalized_entropy = ACBEModel.normalize_entropy(entropy)
                 
                 # Actualizar configuración de exposición máxima
                 SystemConfig.MAX_PORTFOLIO_EXPOSURE = config['max_exposure']
             
-            # Pestaña 1: Análisis ACBE
-            with tab1:
-                self.render_acbe_analysis(probabilities, odds_matrix, normalized_entropy)
-            
-            # Verificar que hay al menos 6 partidos para S73
+            # Verificar que tenemos suficientes partidos para S73
             if len(probabilities) < 6:
-                st.warning("⚠️ Se necesitan al menos 6 partidos para el sistema S73")
+                st.warning(f"⚠️ Se necesitan al menos 6 partidos para el sistema S73. Actuales: {len(probabilities)}")
                 return
             
             # Usar solo primeros 6 partidos para S73 (sistema clásico)
@@ -1505,16 +1931,20 @@ class ACBEApp:
             odds_6 = odds_matrix[:6, :]
             entropy_6 = normalized_entropy[:6]
             
-            # Pestaña 2: Sistema S73
-            with tab2:
+            # ===== PESTAÑA ANÁLISIS ACBE =====
+            with tabs[analysis_tab_idx]:
+                self.render_acbe_analysis(probs_6, odds_6, entropy_6)
+            
+            # ===== PESTAÑA SISTEMA S73 =====
+            with tabs[s73_tab_idx]:
                 s73_results = self.render_s73_system(probs_6, odds_6, entropy_6, config['bankroll'])
             
-            # Pestaña 3: Backtesting
-            with tab3:
+            # ===== PESTAÑA BACKTESTING =====
+            with tabs[backtest_tab_idx]:
                 # Ejecutar backtesting
                 backtester = VectorizedBacktester(initial_bankroll=config['bankroll'])
                 
-                with st.spinner("Ejecutando backtesting completo..."):
+                with st.spinner("🔄 Ejecutando backtesting completo..."):
                     backtest_results = backtester.run_backtest(
                         probs_6, odds_6, entropy_6,
                         s73_results,
@@ -1525,9 +1955,10 @@ class ACBEApp:
                 
                 self.render_backtest_results(backtest_results, config)
             
-            # Pestaña 4: Resumen ejecutivo
-            with tab4:
-                self.render_executive_summary(s73_results, backtest_results, config)
+            # ===== PESTAÑA RESUMEN EJECUTIVO =====
+            with tabs[summary_tab_idx]:
+                if s73_results and backtest_results:
+                    self.render_executive_summary(s73_results, backtest_results, config)
                 
         except Exception as e:
             st.error(f"❌ Error en la ejecución: {str(e)}")
@@ -1538,5 +1969,6 @@ class ACBEApp:
 # ============================================================================
 
 if __name__ == "__main__":
+    # Inicializar y ejecutar la aplicación
     app = ACBEApp()
     app.run()
