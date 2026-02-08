@@ -1,4 +1,3 @@
-"""
 🎯 ACBE-S73 QUANTUM BETTING SUITE v3.0
 Sistema profesional de optimización de portafolios de apuestas deportivas
 Combina Inferencia Bayesiana Gamma-Poisson, Teoría de la Información y Criterio de Kelly
@@ -1267,672 +1266,6 @@ class DataExporter:
     def export_s73_columns(columns_df, s73_results):
         # Implementación idéntica a v2.3
         return {'csv': {'data': '', 'filename': '', 'mime': ''}}
-
-# ============================================================================
-# MÉTODO PRINCIPAL DE EJECUCIÓN COMPLETO v3.0
-# ============================================================================
-
-def main():
-    """Función principal de ejecución para v3.0 COMPLETA."""
-    # Inicializar estado de sesión
-    SessionStateManager.initialize_session_state()
-    
-    # Configurar página
-    st.set_page_config(
-        page_title="ACBE-S73 Quantum Betting Suite v3.0",
-        page_icon="🎯",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
-    # Header profesional
-    st.title("🎯 ACBE-S73 Quantum Betting Suite v3.0")
-    st.markdown("""
-    <div style="
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 25px;
-        border-radius: 15px;
-        margin-bottom: 30px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    ">
-        <h2 style="color: white; margin: 0; text-align: center;">
-            Sistema Profesional de Optimización de Apuestas Deportivas
-        </h2>
-        <p style="color: white; text-align: center; margin: 10px 0 0 0; font-size: 1.1em;">
-            <strong>Con Doble Reducción: Cobertura (73) + Elite (24) y Visualización Avanzada</strong>
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Crear instancia de la aplicación
-    app = ACBEApp()
-    
-    # Obtener configuración del sidebar
-    config = app.render_sidebar()
-    
-    # Determinar fase actual
-    if st.session_state.current_phase == "input":
-        app.render_data_input_phase(config)
-    
-    else:
-        # Fase de análisis
-        st.session_state.current_phase = "analysis"
-        
-        # Barra de navegación
-        app.render_navigation_bar("analysis")
-        
-        # Verificar que hay datos cargados
-        if not st.session_state.get('matches_data'):
-            st.error("❌ No hay datos cargados. Por favor, regresa a la fase de ingreso de datos.")
-            if st.button("📥 Ir a Ingreso de Datos"):
-                SessionStateManager.reset_to_input()
-                st.rerun()
-            return
-        
-        # Extraer datos del estado de sesión
-        matches_data = st.session_state.matches_data
-        
-        # Validar estructura de datos
-        if 'probabilities' not in matches_data:
-            st.error("❌ Datos incompletos. Faltan probabilidades.")
-            return
-        
-        probabilities = matches_data['probabilities']
-        odds_matrix = matches_data['odds_matrix']
-        normalized_entropies = matches_data['normalized_entropies']
-        
-        # Validar dimensiones
-        if probabilities.shape[0] < 6:
-            st.error(f"❌ Se requieren al menos 6 partidos. Solo hay {probabilities.shape[0]}.")
-            return
-        
-        # Usar solo los primeros 6 partidos para S73
-        probs_6 = probabilities[:6, :]
-        odds_6 = odds_matrix[:6, :] if odds_matrix.shape[0] >= 6 else odds_matrix
-        entropy_6 = normalized_entropies[:6] if len(normalized_entropies) >= 6 else normalized_entropies
-        
-        # Crear pestañas principales con iconos mejorados
-        tabs = st.tabs([
-            "📊 Análisis ACBE", 
-            "🧮 Sistema S73 v3.0", 
-            "📈 Backtesting Avanzado",
-            "📊 Portafolio Inteligente",
-            "📋 Resumen Ejecutivo"
-        ])
-        
-        # Variables para compartir resultados entre pestañas
-        s73_results = None
-        backtest_results = None
-        portfolio_metrics = None
-        
-        # ============================================================================
-        # PESTAÑA 1: ANÁLISIS ACBE
-        # ============================================================================
-        with tabs[0]:
-            st.header("🔬 Análisis ACBE - Probabilidades Bayesianas")
-            
-            # Calcular métricas ACBE
-            entropy = ACBEModel.calculate_entropy(probs_6)
-            expected_value = InformationTheory.calculate_expected_value(probs_6, odds_6)
-            
-            # Clasificar partidos
-            allowed_signs, classifications = InformationTheory.classify_matches_by_entropy(
-                probs_6, entropy_6, odds_6
-            )
-            
-            # DataFrames para visualización
-            df_acbe = pd.DataFrame({
-                'Partido': range(1, 7),
-                'Equipo Local': [f"Local {i+1}" for i in range(6)],
-                'Equipo Visitante': [f"Visitante {i+1}" for i in range(6)],
-                'Clasificación': classifications,
-                'P(1)': probs_6[:, 0],
-                'P(X)': probs_6[:, 1],
-                'P(2)': probs_6[:, 2],
-                'Entropía': entropy,
-                'Entropía Norm.': entropy_6,
-                'Signos Permitidos': [str([SystemConfig.OUTCOME_LABELS[s] for s in signs]) 
-                                    for signs in allowed_signs]
-            })
-            
-            df_odds = pd.DataFrame({
-                'Partido': range(1, 7),
-                'Cuota 1': odds_6[:, 0],
-                'Cuota X': odds_6[:, 1],
-                'Cuota 2': odds_6[:, 2],
-                'EV 1': expected_value[:, 0],
-                'EV X': expected_value[:, 1],
-                'EV 2': expected_value[:, 2],
-                'Margen (%)': [(1/odds_6[i,0] + 1/odds_6[i,1] + 1/odds_6[i,2] - 1)*100 
-                              for i in range(6)]
-            })
-            
-            # Mostrar en columnas
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("📊 Probabilidades ACBE")
-                st.dataframe(
-                    df_acbe.style.format({
-                        'P(1)': '{:.3f}',
-                        'P(X)': '{:.3f}',
-                        'P(2)': '{:.3f}',
-                        'Entropía': '{:.3f}',
-                        'Entropía Norm.': '{:.3f}'
-                    }).background_gradient(subset=['P(1)', 'P(X)', 'P(2)'], cmap='Blues'),
-                    use_container_width=True,
-                    height=400
-                )
-            
-            with col2:
-                st.subheader("💰 Cuotas y Valor Esperado")
-                st.dataframe(
-                    df_odds.style.format({
-                        'Cuota 1': '{:.2f}',
-                        'Cuota X': '{:.2f}',
-                        'Cuota 2': '{:.2f}',
-                        'EV 1': '{:.3f}',
-                        'EV X': '{:.3f}',
-                        'EV 2': '{:.3f}',
-                        'Margen (%)': '{:.2f}%'
-                    }).applymap(
-                        lambda x: 'color: green' if x > 0 else 'color: red' if x < 0 else '',
-                        subset=['EV 1', 'EV X', 'EV 2']
-                    ),
-                    use_container_width=True,
-                    height=400
-                )
-            
-            # Visualizaciones
-            st.subheader("📈 Visualizaciones ACBE")
-            
-            # Gráfico de probabilidades
-            fig_probs = go.Figure()
-            for i, outcome in enumerate(['1', 'X', '2']):
-                fig_probs.add_trace(go.Bar(
-                    x=[f"Partido {j+1}" for j in range(6)],
-                    y=probs_6[:, i],
-                    name=outcome,
-                    marker_color=SystemConfig.OUTCOME_COLORS[i],
-                    text=[f'{p:.1%}' for p in probs_6[:, i]],
-                    textposition='auto'
-                ))
-            
-            fig_probs.update_layout(
-                title="Probabilidades ACBE por Partido",
-                barmode='stack',
-                xaxis_title="Partido",
-                yaxis_title="Probabilidad",
-                height=400
-            )
-            
-            st.plotly_chart(fig_probs, use_container_width=True)
-        
-        # ============================================================================
-        # PESTAÑA 2: SISTEMA S73 v3.0 (PRINCIPAL)
-        # ============================================================================
-        with tabs[1]:
-            st.header("🧮 Sistema S73 v3.0 - Doble Reducción Inteligente")
-            
-            # Ejecutar sistema S73 completo
-            with st.spinner("🔄 Construyendo sistema S73 con reducción elite..."):
-                s73_results = app.render_s73_system(
-                    probs_6, odds_6, entropy_6,
-                    config['bankroll'], config
-                )
-            
-            # Guardar en estado de sesión para uso en otras pestañas
-            st.session_state.s73_results = s73_results
-        
-        # ============================================================================
-        # PESTAÑA 3: BACKTESTING AVANZADO
-        # ============================================================================
-        with tabs[2]:
-            st.header("📈 Backtesting Avanzado - Simulación Monte Carlo")
-            
-            if not st.session_state.get('s73_results'):
-                st.warning("⚠️ Ejecuta primero el sistema S73 para ver el backtesting")
-                st.info("Ve a la pestaña '🧮 Sistema S73 v3.0' y ejecuta el sistema")
-            else:
-                # Selector de tipo de backtesting
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    backtest_type = st.selectbox(
-                        "Tipo de backtesting:",
-                        ["Completo (100 rondas)", "Rápido (50 rondas)", "Extenso (200 rondas)"]
-                    )
-                    
-                    # Mapear a parámetros
-                    if backtest_type == "Completo (100 rondas)":
-                        n_rounds = 100
-                        n_sims = 1000
-                    elif backtest_type == "Rápido (50 rondas)":
-                        n_rounds = 50
-                        n_sims = 500
-                    else:
-                        n_rounds = 200
-                        n_sims = 2000
-                
-                with col2:
-                    kelly_fraction = st.slider(
-                        "Fracción de Kelly",
-                        min_value=0.1,
-                        max_value=1.0,
-                        value=config.get('kelly_fraction', 0.5),
-                        step=0.1
-                    )
-                
-                with col3:
-                    portfolio_for_backtest = st.radio(
-                        "Portafolio a simular:",
-                        ["Set Completo", "Set Elite"],
-                        index=0 if config['portfolio_type'] == 'full' else 1
-                    )
-                
-                # Ejecutar backtesting
-                if st.button("🎯 Ejecutar Backtesting", type="primary", use_container_width=True):
-                    with st.spinner(f"🔄 Ejecutando backtesting ({n_rounds} rondas × {n_sims} simulaciones)..."):
-                        backtester = VectorizedBacktester(initial_bankroll=config['bankroll'])
-                        
-                        # Determinar qué combinaciones usar
-                        if portfolio_for_backtest == "Set Elite" and s73_results.get('elite_combinations') is not None:
-                            combinations = s73_results['elite_combinations']
-                            probabilities = s73_results.get('elite_probabilities', s73_results['probabilities'][:len(combinations)])
-                        else:
-                            combinations = s73_results['combinations']
-                            probabilities = s73_results['probabilities']
-                        
-                        # Preparar datos para backtesting
-                        backtest_data = {
-                            'combinations': combinations,
-                            'probabilities': probabilities,
-                            'kelly_stakes': s73_results['kelly_stakes'][:len(combinations)]
-                        }
-                        
-                        # Ejecutar backtesting
-                        backtest_results = backtester.run_backtest(
-                            probs_6, odds_6, entropy_6,
-                            backtest_data,
-                            n_rounds=n_rounds,
-                            n_sims_per_round=n_sims,
-                            kelly_fraction=kelly_fraction,
-                            manual_stake=config.get('manual_stake'),
-                            portfolio_type='elite' if portfolio_for_backtest == "Set Elite" else 'full'
-                        )
-                        
-                        # Guardar resultados
-                        st.session_state.backtest_results = backtest_results
-                        
-                        # Mostrar métricas principales
-                        metrics = backtest_results['final_metrics']
-                        
-                        st.success(f"✅ Backtesting completado: {n_rounds} rondas simuladas")
-                        
-                        # Métricas en columnas
-                        col1, col2, col3, col4 = st.columns(4)
-                        
-                        with col1:
-                            roi_color = "green" if metrics['total_return_pct'] > 0 else "red"
-                            st.metric(
-                                "ROI Total", 
-                                f"{metrics['total_return_pct']:+.2f}%",
-                                delta=f"{metrics['roi_per_round']:+.3f}% por ronda"
-                            )
-                        
-                        with col2:
-                            st.metric("Sharpe Ratio", f"{metrics['sharpe_ratio']:.2f}")
-                        
-                        with col3:
-                            st.metric("Max Drawdown", f"{metrics['max_drawdown']:.2f}%")
-                        
-                        with col4:
-                            st.metric("Win Rate", f"{metrics['win_rate']:.2f}%")
-                        
-                        # Gráficos de backtesting
-                        st.subheader("📊 Resultados del Backtesting")
-                        
-                        # Gráfico de equity curve
-                        fig_equity = go.Figure()
-                        fig_equity.add_trace(go.Scatter(
-                            x=list(range(len(backtest_results['equity_curve']))),
-                            y=backtest_results['equity_curve'],
-                            mode='lines',
-                            name='Bankroll',
-                            line=dict(color=SystemConfig.COLORS['success'], width=3),
-                            fill='tozeroy',
-                            fillcolor='rgba(76, 175, 80, 0.1)'
-                        ))
-                        
-                        fig_equity.update_layout(
-                            title="Evolución del Bankroll",
-                            xaxis_title="Ronda",
-                            yaxis_title="Bankroll (€)",
-                            height=400,
-                            showlegend=True
-                        )
-                        
-                        st.plotly_chart(fig_equity, use_container_width=True)
-                        
-                        # Distribución de retornos
-                        fig_returns = go.Figure()
-                        returns = backtest_results['all_returns']
-                        
-                        fig_returns.add_trace(go.Histogram(
-                            x=returns,
-                            nbinsx=50,
-                            name='Retornos',
-                            marker_color=SystemConfig.COLORS['info'],
-                            opacity=0.7,
-                            hovertemplate="Retorno: %{x:.2f}<br>Frecuencia: %{y}<extra></extra>"
-                        ))
-                        
-                        # Líneas de referencia
-                        mean_return = np.mean(returns)
-                        median_return = np.median(returns)
-                        
-                        fig_returns.add_vline(
-                            x=mean_return,
-                            line_dash="dash",
-                            line_color=SystemConfig.COLORS['primary'],
-                            annotation_text=f"Media: €{mean_return:.2f}"
-                        )
-                        
-                        fig_returns.add_vline(
-                            x=median_return,
-                            line_dash="dot",
-                            line_color=SystemConfig.COLORS['secondary'],
-                            annotation_text=f"Mediana: €{median_return:.2f}"
-                        )
-                        
-                        fig_returns.update_layout(
-                            title="Distribución de Retornos por Ronda",
-                            xaxis_title="Retorno (€)",
-                            yaxis_title="Frecuencia",
-                            height=400
-                        )
-                        
-                        st.plotly_chart(fig_returns, use_container_width=True)
-        
-        # ============================================================================
-        # PESTAÑA 4: PORTFOLIO INTELIGENTE
-        # ============================================================================
-        with tabs[3]:
-            st.header("📊 Portafolio Inteligente - Gestión de Riesgo")
-            
-            if not st.session_state.get('s73_results'):
-                st.warning("⚠️ Ejecuta primero el sistema S73 para ver el análisis de portafolio")
-            else:
-                # Inicializar Portfolio Engine
-                portfolio_engine = PortfolioEngine(initial_bankroll=config['bankroll'])
-                
-                # Agregar estrategia según tipo de portafolio
-                portfolio_type = config['portfolio_type']
-                
-                if portfolio_type == "elite" and s73_results.get('elite_combinations') is not None:
-                    combinations = s73_results['elite_combinations']
-                    probabilities = s73_results.get('elite_probabilities', s73_results['probabilities'][:len(combinations)])
-                    stakes = s73_results['kelly_stakes'][:len(combinations)]
-                    strategy_type = 's73_elite'
-                else:
-                    combinations = s73_results['combinations']
-                    probabilities = s73_results['probabilities']
-                    stakes = s73_results['kelly_stakes']
-                    strategy_type = 's73_full'
-                
-                # Calcular cuotas de combinaciones
-                combination_odds = np.zeros(len(combinations))
-                for i, combo in enumerate(combinations):
-                    combination_odds[i] = S73System.calculate_combination_odds(combo, odds_6)
-                
-                # Agregar estrategia al portafolio
-                portfolio_engine.add_strategy(
-                    strategy_type,
-                    stakes,
-                    combination_odds,
-                    probabilities
-                )
-                
-                # Calcular métricas del portafolio
-                portfolio_metrics = portfolio_engine.calculate_portfolio_metrics(portfolio_type=portfolio_type)
-                
-                # Mostrar métricas clave
-                st.subheader("📈 Métricas Clave del Portafolio")
-                
-                if strategy_type in portfolio_metrics:
-                    metrics = portfolio_metrics[strategy_type]
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        ev_color = "green" if metrics['Expected Value (EV)'] > 0 else "red"
-                        st.metric("Valor Esperado", f"€{metrics['Expected Value (EV)']:.2f}")
-                    
-                    with col2:
-                        st.metric("Sharpe Ratio", f"{metrics['Sharpe Ratio']:.2f}")
-                    
-                    with col3:
-                        st.metric("Exposición Total", f"{metrics['Total Exposure (%)']:.1f}%")
-                    
-                    with col4:
-                        st.metric("Prob. Ruina", f"{metrics['Probability of Ruin (%)']:.2f}%")
-                    
-                    # Gráfico de composición
-                    st.subheader("🥧 Composición del Portafolio")
-                    
-                    # Crear DataFrame para visualización
-                    portfolio_df = pd.DataFrame({
-                        'Columna': [f"Col {i+1}" for i in range(len(stakes))],
-                        'Combinación': [''.join([SystemConfig.OUTCOME_LABELS[s] for s in combo]) for combo in combinations],
-                        'Stake (%)': stakes * 100,
-                        'Probabilidad': probabilities,
-                        'Cuota': combination_odds,
-                        'EV': probabilities * combination_odds - 1
-                    })
-                    
-                    # Ordenar por stake
-                    portfolio_df = portfolio_df.sort_values('Stake (%)', ascending=False)
-                    
-                    # Gráfico de distribución de stakes
-                    fig_stakes = go.Figure()
-                    
-                    fig_stakes.add_trace(go.Bar(
-                        x=portfolio_df['Columna'],
-                        y=portfolio_df['Stake (%)'],
-                        marker_color=portfolio_df['EV'].apply(
-                            lambda x: SystemConfig.COLORS['success'] if x > 0 else SystemConfig.COLORS['danger']
-                        ),
-                        text=portfolio_df['Combinación'],
-                        hovertemplate="<b>%{text}</b><br>Stake: %{y:.2f}%<br>EV: %{customdata:.3f}<extra></extra>",
-                        customdata=portfolio_df['EV']
-                    ))
-                    
-                    fig_stakes.update_layout(
-                        title="Distribución de Stakes por Columna",
-                        xaxis_title="Columna",
-                        yaxis_title="Stake (%)",
-                        height=400,
-                        showlegend=False
-                    )
-                    
-                    st.plotly_chart(fig_stakes, use_container_width=True)
-                    
-                    # Tabla detallada
-                    with st.expander("📋 Ver detalles del portafolio", expanded=False):
-                        display_df = portfolio_df.copy()
-                        display_df['Stake (%)'] = display_df['Stake (%)'].apply(lambda x: f'{x:.2f}%')
-                        display_df['Probabilidad'] = display_df['Probabilidad'].apply(lambda x: f'{x:.2%}')
-                        display_df['Cuota'] = display_df['Cuota'].apply(lambda x: f'{x:.2f}')
-                        display_df['EV'] = display_df['EV'].apply(lambda x: f'{x:.3f}')
-                        
-                        st.dataframe(display_df, use_container_width=True, height=300)
-        
-        # ============================================================================
-        # PESTAÑA 5: RESUMEN EJECUTIVO
-        # ============================================================================
-        with tabs[4]:
-            st.header("📋 Resumen Ejecutivo v3.0")
-            
-            # Crear resumen ejecutivo
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                # Información del sistema
-                st.subheader("🎯 Estado del Sistema")
-                
-                info_cols = st.columns(3)
-                
-                with info_cols[0]:
-                    st.metric("Versión", "v3.0")
-                    st.metric("Partidos", "6/6")
-                
-                with info_cols[1]:
-                    portfolio_type = config['portfolio_type']
-                    st.metric("Portafolio", "Elite" if portfolio_type == "elite" else "Full")
-                    
-                    if s73_results:
-                        st.metric("Columnas", s73_results['final_count'])
-                
-                with info_cols[2]:
-                    if config['apply_elite_reduction']:
-                        st.metric("Reducción", "✅ Aplicada")
-                        st.metric("Target Elite", config['elite_columns_target'])
-                    else:
-                        st.metric("Reducción", "⏸️ No aplicada")
-                
-                # Recomendaciones
-                st.subheader("💡 Recomendaciones")
-                
-                if s73_results:
-                    total_exposure = np.sum(s73_results['kelly_stakes']) * 100
-                    
-                    if total_exposure > 20:
-                        st.error("**❌ ALTA EXPOSICIÓN:** Reducir inmediatamente a <20%")
-                    elif total_exposure > 15:
-                        st.warning("**⚠️ EXPOSICIÓN MODERADA:** Considerar reducir a <15%")
-                    else:
-                        st.success("**✅ EXPOSICIÓN ÓPTIMA:** Dentro de límites seguros")
-                    
-                    # Recomendación de portafolio
-                    if portfolio_type == "full" and config['apply_elite_reduction']:
-                        st.info("""
-                        **🎯 Recomendación de Portafolio:**
-                        - Portafolio Elite disponible
-                        - 3x concentración de capital
-                        - Mayor ROI esperado
-                        - Considerar cambiar a Elite
-                        """)
-            
-            with col2:
-                # Calificación del sistema
-                st.subheader("🏆 Calificación")
-                
-                # Calcular score (simplificado)
-                if s73_results and backtest_results:
-                    metrics = backtest_results['final_metrics']
-                    
-                    # Puntuar en escala 0-100
-                    roi_score = min(max(metrics['total_return_pct'] + 50, 0), 100)
-                    sharpe_score = min(max(metrics['sharpe_ratio'] * 50, 0), 100)
-                    dd_score = 100 - min(max(metrics['max_drawdown'], 0), 100)
-                    
-                    overall_score = (roi_score * 0.4 + sharpe_score * 0.3 + dd_score * 0.3)
-                    
-                    # Determinar calificación
-                    if overall_score >= 85:
-                        rating = "A+"
-                        color = "#4CAF50"
-                        description = "Excelente"
-                    elif overall_score >= 70:
-                        rating = "B+"
-                        color = "#8BC34A"
-                        description = "Muy Bueno"
-                    elif overall_score >= 55:
-                        rating = "C+"
-                        color = "#FFC107"
-                        description = "Bueno"
-                    elif overall_score >= 40:
-                        rating = "D"
-                        color = "#FF9800"
-                        description = "Aceptable"
-                    else:
-                        rating = "F"
-                        color = "#F44336"
-                        description = "Mejorable"
-                    
-                    # Mostrar calificación
-                    st.markdown(f"""
-                    <div style="
-                        background-color: {color}20;
-                        border-left: 5px solid {color};
-                        padding: 20px;
-                        border-radius: 10px;
-                        text-align: center;
-                        margin: 10px 0;
-                    ">
-                        <h1 style="color: {color}; margin: 0; font-size: 48px;">{rating}</h1>
-                        <p style="color: {color}; font-weight: bold; margin: 5px 0;">{description}</p>
-                        <p style="color: #666; font-size: 14px;">Score: {overall_score:.1f}/100</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-            
-            # Botones de acción
-            st.subheader("🚀 Acciones")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if st.button("📄 Generar Reporte PDF", use_container_width=True):
-                    st.info("Funcionalidad de reporte PDF en desarrollo")
-            
-            with col2:
-                if st.button("💾 Exportar Todo", use_container_width=True):
-                    # Exportar datos
-                    if s73_results:
-                        export_data = DataExporter.export_complete_system_v3(
-                            s73_results['columns_df'],
-                            s73_results,
-                            {'combinations': s73_results.get('elite_combinations'), 
-                             'probabilities': s73_results.get('elite_probabilities'),
-                             'elite_scores': s73_results.get('elite_scores')} 
-                             if s73_results.get('elite_combinations') is not None else None
-                        )
-                        
-                        # Ofrecer descarga
-                        st.download_button(
-                            label="📥 Descargar Excel Completo",
-                            data=export_data['excel']['data'],
-                            file_name=export_data['excel']['filename'],
-                            mime=export_data['excel']['mime'],
-                            use_container_width=True
-                        )
-            
-            with col3:
-                if st.button("🔄 Nuevo Análisis", use_container_width=True):
-                    SessionStateManager.reset_to_input()
-                    st.rerun()
-            
-            # Resumen de métricas
-            if s73_results and backtest_results:
-                st.subheader("📊 Resumen de Métricas")
-                
-                summary_cols = st.columns(4)
-                backtest_metrics = backtest_results['final_metrics']
-                
-                with summary_cols[0]:
-                    st.metric("ROI Total", f"{backtest_metrics['total_return_pct']:+.2f}%")
-                    st.metric("Exposición", f"{np.sum(s73_results['kelly_stakes']) * 100:.1f}%")
-                
-                with summary_cols[1]:
-                    st.metric("Sharpe Ratio", f"{backtest_metrics['sharpe_ratio']:.2f}")
-                    st.metric("Win Rate", f"{backtest_metrics['win_rate']:.2f}%")
-                
-                with summary_cols[2]:
-                    st.metric("Max Drawdown", f"{backtest_metrics['max_drawdown']:.2f}%")
-                    st.metric("Profit Factor", f"{backtest_metrics['profit_factor']:.2f}")
-                
-                with summary_cols[3]:
-                    st.metric("Prob. Ruina", f"{backtest_metrics['ruin_probability']:.2f}%")
-                    st.metric("Columnas", s73_results['final_count'])
 
 # ============================================================================
 # CONTINUACIÓN: SECCIÓN 6 - PORTFOLIO ENGINE MEJORADO PARA DOBLE PORTAFOLIO v3.0
@@ -3409,11 +2742,14 @@ class ACBEAppV3:
         self.render_dashboard()
 
 # ============================================================================
-# EJECUCIÓN PRINCIPAL v3.0
+# MÉTODO PRINCIPAL DE EJECUCIÓN COMPLETO v3.0 - CORREGIDO
 # ============================================================================
 
 def main():
-    """Función principal de ejecución para v3.0 completa."""
+    """Función principal de ejecución para v3.0 COMPLETA - CORREGIDA."""
+    # Inicializar estado de sesión
+    SessionStateManager.initialize_session_state()
+    
     # Configurar página
     st.set_page_config(
         page_title="ACBE-S73 Quantum Betting Suite v3.0",
@@ -3422,21 +2758,951 @@ def main():
         initial_sidebar_state="expanded"
     )
     
-    # Inicializar aplicación
-    app = ACBEAppV3()
+    # Header profesional
+    st.title("🎯 ACBE-S73 Quantum Betting Suite v3.0")
+    st.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 25px;
+        border-radius: 15px;
+        margin-bottom: 30px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    ">
+        <h2 style="color: white; margin: 0; text-align: center;">
+            Sistema Profesional de Optimización de Apuestas Deportivas
+        </h2>
+        <p style="color: white; text-align: center; margin: 10px 0 0 0; font-size: 1.1em;">
+            <strong>Con Doble Reducción: Cobertura (73) + Elite (24) y Visualización Avanzada</strong>
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Ejecutar aplicación
-    app.run()
+    # ============================================================================
+    # SIDEBAR PROFESIONAL (CON KEYS ÚNICAS)
+    # ============================================================================
+    with st.sidebar:
+        st.header("⚙️ Configuración v3.0")
+        
+        # Indicador de versión
+        st.caption(f"v3.0 | {datetime.now().strftime('%Y-%m-%d')}")
+        
+        # Botón para limpiar datos (CON KEY ÚNICA)
+        if st.button("🔄 Reiniciar Sistema", type="secondary", use_container_width=True, key="sidebar_reset_button"):
+            SessionStateManager.reset_to_input()
+            st.rerun()
+        
+        # Bankroll inicial
+        bankroll = st.number_input(
+            "Bankroll Inicial (€)",
+            min_value=100.0,
+            max_value=1000000.0,
+            value=SystemConfig.DEFAULT_BANKROLL,
+            step=1000.0,
+            help="Capital inicial para simulaciones",
+            key="sidebar_bankroll_input"
+        )
+        
+        # Selector de Portafolio
+        st.subheader("🎯 Selección de Portafolio")
+        
+        portfolio_type = st.radio(
+            "Tipo de portafolio a jugar:",
+            ["Set Completo (73 columnas)", "Set Elite (24 columnas)"],
+            index=0,
+            help="Set Completo: Mayor cobertura, menor stake por columna\nSet Elite: Mayor concentración, mayor stake por columna",
+            key="sidebar_portfolio_selector"
+        )
+        
+        portfolio_type_value = "full" if portfolio_type == "Set Completo (73 columnas)" else "elite"
+        st.session_state.portfolio_type = portfolio_type_value
+        
+        # Gestión de Stake
+        st.subheader("💰 Gestión de Stake")
+        
+        auto_stake_mode = st.toggle(
+            "Modo Automático (Kelly)",
+            value=True,
+            help="Si activado, usa Kelly automático. Si desactivado, permite stake manual.",
+            key="sidebar_auto_stake_toggle"
+        )
+        
+        manual_stake = None
+        if not auto_stake_mode:
+            manual_stake = st.number_input(
+                "Stake Manual (% por columna)",
+                min_value=0.01,
+                max_value=10.0,
+                value=1.0,
+                step=0.1,
+                help="Porcentaje del bankroll a apostar en cada columna S73",
+                key="sidebar_manual_stake_input"
+            )
+            manual_stake_fraction = manual_stake / 100.0
+            st.info(f"Stake manual: {manual_stake}% del bankroll por columna", icon="💰")
+        else:
+            manual_stake_fraction = None
+            kelly_fraction = st.slider(
+                "Fracción de Kelly",
+                min_value=0.1,
+                max_value=1.0,
+                value=0.5,
+                step=0.1,
+                help="Fracción conservadora del Kelly completo",
+                key="sidebar_kelly_fraction_slider"
+            )
+        
+        # Parámetros de riesgo
+        st.subheader("📊 Gestión de Riesgo")
+        
+        max_exposure = st.slider(
+            "Exposición Máxima (%)",
+            min_value=5,
+            max_value=30,
+            value=15,
+            step=1,
+            help="Porcentaje máximo del bankroll en apuestas",
+            key="sidebar_max_exposure_slider"
+        )
+        
+        # Configuración de simulaciones
+        st.subheader("🎲 Parámetros de Simulación")
+        
+        monte_carlo_sims = st.number_input(
+            "Simulaciones por Ronda",
+            min_value=1000,
+            max_value=50000,
+            value=1000,
+            step=1000,
+            key="sidebar_monte_carlo_input"
+        )
+        
+        n_rounds = st.slider(
+            "Rondas de Backtesting",
+            min_value=10,
+            max_value=500,
+            value=100,
+            step=10,
+            key="sidebar_n_rounds_slider"
+        )
+        
+        # Configuración de reducción elite
+        st.subheader("🏆 Reducción Elite")
+        
+        elite_columns_target = st.slider(
+            "Columnas Elite",
+            min_value=12,
+            max_value=36,
+            value=SystemConfig.ELITE_COLUMNS_TARGET,
+            step=1,
+            help="Número de columnas a seleccionar en la reducción elite",
+            key="sidebar_elite_columns_slider"
+        )
+        
+        apply_elite_reduction = st.toggle(
+            "Aplicar reducción elite",
+            value=True,
+            help="Aplicar Score de Eficiencia para seleccionar las mejores columnas",
+            key="sidebar_elite_reduction_toggle"
+        )
+        
+        # Fuente de datos
+        st.subheader("📊 Fuente de Datos")
+        data_source = st.radio(
+            "Seleccionar fuente:",
+            ["⚽ Input Manual", "📈 Datos Sintéticos", "📂 Cargar CSV"],
+            index=0,
+            key="sidebar_data_source_radio"
+        )
+        
+        uploaded_file = None
+        n_matches = SystemConfig.NUM_MATCHES
+        
+        if data_source == "📈 Datos Sintéticos":
+            n_matches = st.slider(
+                "Número de partidos",
+                min_value=6,
+                max_value=15,
+                value=6,
+                step=1,
+                key="sidebar_n_matches_slider"
+            )
+        elif data_source == "📂 Cargar CSV":
+            uploaded_file = st.file_uploader(
+                "Subir CSV con datos",
+                type=['csv'],
+                help="Columnas requeridas: home_attack, away_attack, home_defense, away_defense, odds_1, odds_X, odds_2",
+                key="sidebar_csv_uploader"
+            )
+        
+        # Configuración avanzada (expandible)
+        with st.expander("⚙️ Configuración Avanzada", expanded=False):
+            # Filtros S73
+            apply_s73_filters = st.toggle(
+                "Aplicar filtros institucionales S73",
+                value=True,
+                key="advanced_s73_filters_toggle"
+            )
+            
+            if apply_s73_filters:
+                min_prob = st.slider(
+                    "Prob. mínima por opción",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=SystemConfig.MIN_OPTION_PROBABILITY,
+                    step=0.01,
+                    key="advanced_min_prob_slider"
+                )
+                min_gap = st.slider(
+                    "Gap mínimo 1ª-2ª opción",
+                    min_value=0.0,
+                    max_value=0.5,
+                    value=SystemConfig.MIN_PROBABILITY_GAP,
+                    step=0.01,
+                    key="advanced_min_gap_slider"
+                )
+                min_ev = st.slider(
+                    "EV mínimo",
+                    min_value=-0.5,
+                    max_value=0.5,
+                    value=SystemConfig.MIN_EV_THRESHOLD,
+                    step=0.01,
+                    key="advanced_min_ev_slider"
+                )
+                
+                # Actualizar configuración
+                SystemConfig.MIN_OPTION_PROBABILITY = min_prob
+                SystemConfig.MIN_PROBABILITY_GAP = min_gap
+                SystemConfig.MIN_EV_THRESHOLD = min_ev
+        
+        # Guardar configuración
+        config = {
+            'bankroll': bankroll,
+            'portfolio_type': portfolio_type_value,
+            'auto_stake_mode': auto_stake_mode,
+            'manual_stake': manual_stake_fraction,
+            'kelly_fraction': kelly_fraction if auto_stake_mode else None,
+            'max_exposure': max_exposure / 100,
+            'monte_carlo_sims': monte_carlo_sims,
+            'n_rounds': n_rounds,
+            'elite_columns_target': elite_columns_target,
+            'apply_elite_reduction': apply_elite_reduction,
+            'data_source': data_source,
+            'n_matches': n_matches,
+            'uploaded_file': uploaded_file,
+            'apply_s73_filters': apply_s73_filters if 'apply_s73_filters' in locals() else True
+        }
+    
+    # ============================================================================
+    # CONTENIDO PRINCIPAL
+    # ============================================================================
+    
+    # Determinar fase actual
+    if st.session_state.current_phase == "input":
+        # Fase de input de datos
+        st.header("📥 Fase 1: Ingreso de Datos")
+        
+        # Selector de modo de entrada
+        input_mode = st.radio(
+            "Selecciona el modo de entrada:",
+            ["⚡ Datos Rápidos (Ejemplo)", "📝 Ingreso Manual Completo"],
+            index=0,
+            key="main_input_mode_radio"
+        )
+        
+        if input_mode == "⚡ Datos Rápidos (Ejemplo)":
+            st.info("Se generarán datos de ejemplo realistas para demostración.")
+            
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.write("**Configuración de ejemplo:**")
+                st.write("- 6 partidos con probabilidades realistas")
+                st.write("- Cuotas con márgenes del 5-7%")
+                st.write("- Entropías variadas para análisis completo")
+            
+            with col2:
+                if st.button("🚀 Generar Datos de Ejemplo", type="primary", use_container_width=True, key="generate_example_data_button"):
+                    with st.spinner("Generando datos de ejemplo..."):
+                        # Generar datos sintéticos REALISTAS
+                        np.random.seed(42)
+                        
+                        # Probabilidades realistas usando Dirichlet
+                        alpha_params = np.random.uniform(1.5, 3.0, (6, 3))
+                        probabilities = np.zeros((6, 3))
+                        for i in range(6):
+                            probabilities[i] = np.random.dirichlet(alpha_params[i])
+                        
+                        # Cuotas con márgenes realistas
+                        margins = np.random.uniform(0.03, 0.07, 6)
+                        odds_matrix = np.zeros((6, 3))
+                        for i in range(6):
+                            fair_odds = 1 / probabilities[i]
+                            odds_matrix[i] = fair_odds * (1 + margins[i])
+                            # Asegurar límites razonables
+                            odds_matrix[i] = np.clip(odds_matrix[i], 1.5, 10.0)
+                        
+                        # Calcular entropías
+                        entropy = ACBEModel.calculate_entropy(probabilities)
+                        normalized_entropy = ACBEModel.normalize_entropy(entropy)
+                        
+                        # Guardar en estado de sesión
+                        st.session_state.matches_data = {
+                            'probabilities': probabilities,
+                            'odds_matrix': odds_matrix,
+                            'normalized_entropies': normalized_entropy,
+                            'source': 'example'
+                        }
+                        
+                        # Mover a fase de análisis
+                        SessionStateManager.move_to_analysis()
+                        st.success("✅ Datos generados exitosamente!")
+                        st.rerun()
+        
+        else:  # Modo manual completo
+            st.warning("El modo manual completo requiere implementación adicional.")
+            st.info("Usa 'Datos Rápidos' para probar el sistema v3.0.")
+    
+    else:
+        # Fase de análisis
+        st.session_state.current_phase = "analysis"
+        
+        # Verificar que hay datos cargados
+        if not st.session_state.get('matches_data'):
+            st.error("❌ No hay datos cargados. Por favor, regresa a la fase de ingreso de datos.")
+            if st.button("📥 Ir a Ingreso de Datos", key="go_to_input_button"):
+                SessionStateManager.reset_to_input()
+                st.rerun()
+            return
+        
+        # Extraer datos del estado de sesión
+        matches_data = st.session_state.matches_data
+        
+        # Validar estructura de datos
+        required_keys = ['probabilities', 'odds_matrix', 'normalized_entropies']
+        missing_keys = [key for key in required_keys if key not in matches_data]
+        
+        if missing_keys:
+            st.error(f"❌ Datos incompletos. Faltan: {missing_keys}")
+            if st.button("🔄 Regenerar Datos", key="regenerate_data_button"):
+                SessionStateManager.reset_to_input()
+                st.rerun()
+            return
+        
+        probabilities = matches_data['probabilities']
+        odds_matrix = matches_data['odds_matrix']
+        normalized_entropies = matches_data['normalized_entropies']
+        
+        # Validar dimensiones
+        if probabilities.shape[0] < 6:
+            st.error(f"❌ Se requieren al menos 6 partidos. Solo hay {probabilities.shape[0]}.")
+            return
+        
+        # Usar solo los primeros 6 partidos para S73
+        probs_6 = probabilities[:6, :]
+        odds_6 = odds_matrix[:6, :] if odds_matrix.shape[0] >= 6 else odds_matrix
+        entropy_6 = normalized_entropies[:6] if len(normalized_entropies) >= 6 else normalized_entropies
+        
+        # Barra de navegación superior
+        st.markdown("---")
+        nav_col1, nav_col2, nav_col3 = st.columns([1, 3, 1])
+        
+        with nav_col1:
+            if st.button("← Volver a Input", type="secondary", use_container_width=True, key="nav_back_button"):
+                SessionStateManager.reset_to_input()
+                st.rerun()
+        
+        with nav_col2:
+            st.markdown(f"<h3 style='text-align: center;'>📊 Análisis del Sistema v3.0</h3>", unsafe_allow_html=True)
+        
+        with nav_col3:
+            if st.button("🔄 Nuevo Análisis", type="secondary", use_container_width=True, key="nav_new_analysis_button"):
+                SessionStateManager.reset_to_input()
+                st.rerun()
+        
+        st.markdown("---")
+        
+        # Crear pestañas principales con KEYS ÚNICAS
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📊 Análisis ACBE", 
+            "🧮 Sistema S73 v3.0", 
+            "📈 Backtesting Avanzado",
+            "📊 Portafolio Inteligente",
+            "📋 Resumen Ejecutivo"
+        ])
+        
+        # Variables para compartir resultados entre pestañas
+        s73_results = None
+        backtest_results = None
+        
+        # ============================================================================
+        # PESTAÑA 1: ANÁLISIS ACBE
+        # ============================================================================
+        with tab1:
+            st.header("🔬 Análisis ACBE - Probabilidades Bayesianas")
+            
+            # Calcular métricas ACBE
+            entropy = ACBEModel.calculate_entropy(probs_6)
+            expected_value = InformationTheory.calculate_expected_value(probs_6, odds_6)
+            
+            # Clasificar partidos
+            allowed_signs, classifications = InformationTheory.classify_matches_by_entropy(
+                probs_6, entropy_6, odds_6
+            )
+            
+            # DataFrames para visualización
+            df_acbe = pd.DataFrame({
+                'Partido': range(1, 7),
+                'Clasificación': classifications,
+                'P(1)': probs_6[:, 0],
+                'P(X)': probs_6[:, 1],
+                'P(2)': probs_6[:, 2],
+                'Entropía': entropy,
+                'Entropía Norm.': entropy_6,
+                'Signos Permitidos': [str([SystemConfig.OUTCOME_LABELS[s] for s in signs]) 
+                                    for signs in allowed_signs]
+            })
+            
+            df_odds = pd.DataFrame({
+                'Partido': range(1, 7),
+                'Cuota 1': odds_6[:, 0],
+                'Cuota X': odds_6[:, 1],
+                'Cuota 2': odds_6[:, 2],
+                'EV 1': expected_value[:, 0],
+                'EV X': expected_value[:, 1],
+                'EV 2': expected_value[:, 2]
+            })
+            
+            # Mostrar en columnas
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("📊 Probabilidades ACBE")
+                st.dataframe(
+                    df_acbe.style.format({
+                        'P(1)': '{:.3f}',
+                        'P(X)': '{:.3f}',
+                        'P(2)': '{:.3f}',
+                        'Entropía': '{:.3f}',
+                        'Entropía Norm.': '{:.3f}'
+                    }),
+                    use_container_width=True,
+                    height=400
+                )
+            
+            with col2:
+                st.subheader("💰 Cuotas y Valor Esperado")
+                st.dataframe(
+                    df_odds.style.format({
+                        'Cuota 1': '{:.2f}',
+                        'Cuota X': '{:.2f}',
+                        'Cuota 2': '{:.2f}',
+                        'EV 1': '{:.3f}',
+                        'EV X': '{:.3f}',
+                        'EV 2': '{:.3f}'
+                    }).applymap(
+                        lambda x: 'color: green' if x > 0 else 'color: red' if x < 0 else '',
+                        subset=['EV 1', 'EV X', 'EV 2']
+                    ),
+                    use_container_width=True,
+                    height=400
+                )
+            
+            # Visualizaciones
+            st.subheader("📈 Visualizaciones ACBE")
+            
+            # Gráfico de probabilidades
+            fig_probs = go.Figure()
+            for i, outcome in enumerate(['1', 'X', '2']):
+                fig_probs.add_trace(go.Bar(
+                    x=[f"Partido {j+1}" for j in range(6)],
+                    y=probs_6[:, i],
+                    name=outcome,
+                    marker_color=SystemConfig.OUTCOME_COLORS[i],
+                    text=[f'{p:.1%}' for p in probs_6[:, i]],
+                    textposition='auto'
+                ))
+            
+            fig_probs.update_layout(
+                title="Probabilidades ACBE por Partido",
+                barmode='stack',
+                xaxis_title="Partido",
+                yaxis_title="Probabilidad",
+                height=400
+            )
+            
+            st.plotly_chart(fig_probs, use_container_width=True)
+            
+            # Gráfico de entropía
+            fig_entropy = go.Figure()
+            fig_entropy.add_trace(go.Scatter(
+                x=[f"Partido {j+1}" for j in range(6)],
+                y=entropy_6,
+                mode='lines+markers',
+                name='Entropía Normalizada',
+                line=dict(color=SystemConfig.COLORS['primary'], width=3),
+                marker=dict(size=10)
+            ))
+            
+            # Líneas de umbral
+            fig_entropy.add_hline(
+                y=SystemConfig.STRONG_MATCH_THRESHOLD,
+                line_dash="dash",
+                line_color=SystemConfig.COLORS['success'],
+                annotation_text="Fuerte"
+            )
+            fig_entropy.add_hline(
+                y=SystemConfig.MEDIUM_MATCH_THRESHOLD,
+                line_dash="dash", 
+                line_color=SystemConfig.COLORS['warning'],
+                annotation_text="Medio"
+            )
+            
+            fig_entropy.update_layout(
+                title="Clasificación por Entropía",
+                xaxis_title="Partido",
+                yaxis_title="Entropía Normalizada",
+                height=400,
+                yaxis_range=[0, 1]
+            )
+            
+            st.plotly_chart(fig_entropy, use_container_width=True)
+        
+        # ============================================================================
+        # PESTAÑA 2: SISTEMA S73 v3.0 (PRINCIPAL)
+        # ============================================================================
+        with tab2:
+            st.header("🧮 Sistema S73 v3.0 - Doble Reducción Inteligente")
+            
+            # Botón para ejecutar sistema S73
+            if st.button("🚀 Ejecutar Sistema S73 Completo", type="primary", use_container_width=True, key="run_s73_system_button"):
+                with st.spinner("🔄 Construyendo sistema S73 con reducción elite..."):
+                    # Crear instancia de ACBEApp para usar sus métodos
+                    app = ACBEApp()
+                    
+                    # Ejecutar sistema S73
+                    s73_results = app.render_s73_system(
+                        probs_6, odds_6, entropy_6,
+                        config['bankroll'], config
+                    )
+                    
+                    # Guardar en estado de sesión
+                    st.session_state.s73_results = s73_results
+                    st.session_state.s73_executed = True
+                    
+                    st.success("✅ Sistema S73 ejecutado exitosamente!")
+                    
+                    # Mostrar resumen rápido
+                    if s73_results:
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Columnas Generadas", s73_results['final_count'])
+                        with col2:
+                            exposure = np.sum(s73_results['kelly_stakes']) * 100
+                            st.metric("Exposición Total", f"{exposure:.1f}%")
+                        with col3:
+                            if config['apply_elite_reduction']:
+                                st.metric("Reducción Elite", "✅ Aplicada")
+                        with col4:
+                            st.metric("Portafolio", config['portfolio_type'].title())
+            
+            # Si ya se ejecutó, mostrar resultados
+            elif st.session_state.get('s73_executed', False) and st.session_state.get('s73_results'):
+                s73_results = st.session_state.s73_results
+                
+                # Mostrar estadísticas
+                st.subheader("📊 Estadísticas del Sistema")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Columnas S73", s73_results['final_count'])
+                with col2:
+                    exposure = np.sum(s73_results['kelly_stakes']) * 100
+                    st.metric("Exposición Total", f"{exposure:.1f}%")
+                with col3:
+                    avg_prob = np.mean(s73_results['probabilities']) * 100
+                    st.metric("Prob. Promedio", f"{avg_prob:.2f}%")
+                with col4:
+                    st.metric("Portafolio", config['portfolio_type'].title())
+                
+                # Mostrar tabla de columnas
+                st.subheader("📋 Columnas del Sistema")
+                
+                if 'columns_df' in s73_results:
+                    display_df = s73_results['columns_df'].copy()
+                    display_df['Probabilidad'] = display_df['Probabilidad'].apply(lambda x: f'{x:.4%}')
+                    display_df['Cuota'] = display_df['Cuota'].apply(lambda x: f'{x:.2f}')
+                    display_df['Valor Esperado'] = display_df['Valor Esperado'].apply(lambda x: f'{x:.4f}')
+                    display_df['Stake (%)'] = display_df['Stake (%)'].apply(lambda x: f'{x:.2f}%')
+                    
+                    st.dataframe(display_df, use_container_width=True, height=400)
+                
+                # Botón para re-ejecutar
+                if st.button("🔄 Re-ejecutar Sistema", type="secondary", key="re_run_s73_button"):
+                    del st.session_state.s73_results
+                    del st.session_state.s73_executed
+                    st.rerun()
+            
+            else:
+                st.info("👆 Haz clic en 'Ejecutar Sistema S73 Completo' para comenzar el análisis.")
+        
+        # ============================================================================
+        # PESTAÑA 3: BACKTESTING AVANZADO
+        # ============================================================================
+        with tab3:
+            st.header("📈 Backtesting Avanzado - Simulación Monte Carlo")
+            
+            if not st.session_state.get('s73_results'):
+                st.warning("⚠️ Primero ejecuta el Sistema S73 en la pestaña anterior.")
+            else:
+                s73_results = st.session_state.s73_results
+                
+                # Configuración de backtesting
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    backtest_profile = st.selectbox(
+                        "Perfil de Backtesting:",
+                        ["Conservador (50 rondas)", "Balanceado (100 rondas)", "Agresivo (200 rondas)"],
+                        key="backtest_profile_select"
+                    )
+                    
+                    # Mapear a parámetros
+                    if backtest_profile == "Conservador (50 rondas)":
+                        n_rounds = 50
+                        n_sims = 500
+                    elif backtest_profile == "Balanceado (100 rondas)":
+                        n_rounds = 100
+                        n_sims = 1000
+                    else:
+                        n_rounds = 200
+                        n_sims = 2000
+                
+                with col2:
+                    kelly_fraction_bt = st.slider(
+                        "Fracción de Kelly",
+                        min_value=0.1,
+                        max_value=1.0,
+                        value=0.5,
+                        step=0.1,
+                        key="backtest_kelly_slider"
+                    )
+                
+                with col3:
+                    portfolio_for_backtest = st.radio(
+                        "Portafolio a simular:",
+                        ["Set Completo", "Set Elite"],
+                        index=0 if config['portfolio_type'] == 'full' else 1,
+                        key="backtest_portfolio_radio"
+                    )
+                
+                # Ejecutar backtesting
+                if st.button("🎯 Ejecutar Backtesting", type="primary", use_container_width=True, key="run_backtesting_button"):
+                    with st.spinner(f"🔄 Ejecutando backtesting ({n_rounds} rondas × {n_sims} simulaciones)..."):
+                        # Crear backtester
+                        backtester = VectorizedBacktester(initial_bankroll=config['bankroll'])
+                        
+                        # Determinar qué combinaciones usar
+                        if portfolio_for_backtest == "Set Elite" and s73_results.get('elite_combinations') is not None:
+                            combinations = s73_results['elite_combinations']
+                            combo_probs = s73_results.get('elite_probabilities', s73_results['probabilities'][:len(combinations)])
+                            combo_stakes = s73_results['kelly_stakes'][:len(combinations)]
+                        else:
+                            combinations = s73_results['combinations']
+                            combo_probs = s73_results['probabilities']
+                            combo_stakes = s73_results['kelly_stakes']
+                        
+                        # Preparar datos
+                        backtest_data = {
+                            'combinations': combinations,
+                            'probabilities': combo_probs,
+                            'kelly_stakes': combo_stakes
+                        }
+                        
+                        # Ejecutar backtesting
+                        backtest_results = backtester.run_backtest(
+                            probs_6, odds_6, entropy_6,
+                            backtest_data,
+                            n_rounds=n_rounds,
+                            n_sims_per_round=n_sims,
+                            kelly_fraction=kelly_fraction_bt,
+                            manual_stake=config.get('manual_stake'),
+                            portfolio_type='elite' if portfolio_for_backtest == "Set Elite" else 'full'
+                        )
+                        
+                        # Guardar resultados
+                        st.session_state.backtest_results = backtest_results
+                        
+                        # Mostrar resultados
+                        metrics = backtest_results['final_metrics']
+                        
+                        st.success(f"✅ Backtesting completado exitosamente!")
+                        
+                        # Métricas principales
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            roi_color = "green" if metrics['total_return_pct'] > 0 else "red"
+                            st.metric(
+                                "ROI Total", 
+                                f"{metrics['total_return_pct']:+.2f}%",
+                                delta=f"{metrics['roi_per_round']:+.3f}% por ronda"
+                            )
+                        
+                        with col2:
+                            st.metric("Sharpe Ratio", f"{metrics['sharpe_ratio']:.2f}")
+                        
+                        with col3:
+                            st.metric("Max Drawdown", f"{metrics['max_drawdown']:.2f}%")
+                        
+                        with col4:
+                            st.metric("Win Rate", f"{metrics['win_rate']:.2f}%")
+                        
+                        # Gráficos
+                        st.subheader("📊 Resultados del Backtesting")
+                        
+                        # Gráfico de equity
+                        fig_equity = go.Figure()
+                        fig_equity.add_trace(go.Scatter(
+                            x=list(range(len(backtest_results['equity_curve']))),
+                            y=backtest_results['equity_curve'],
+                            mode='lines',
+                            name='Bankroll',
+                            line=dict(color=SystemConfig.COLORS['success'], width=3),
+                            fill='tozeroy',
+                            fillcolor='rgba(76, 175, 80, 0.1)'
+                        ))
+                        
+                        fig_equity.update_layout(
+                            title="Evolución del Bankroll",
+                            xaxis_title="Ronda",
+                            yaxis_title="Bankroll (€)",
+                            height=400
+                        )
+                        
+                        st.plotly_chart(fig_equity, use_container_width=True)
+        
+        # ============================================================================
+        # PESTAÑA 4: PORTFOLIO INTELIGENTE
+        # ============================================================================
+        with tab4:
+            st.header("📊 Portafolio Inteligente - Gestión de Riesgo")
+            
+            if not st.session_state.get('s73_results'):
+                st.warning("⚠️ Primero ejecuta el Sistema S73 en la pestaña 2.")
+            else:
+                s73_results = st.session_state.s73_results
+                
+                # Calcular métricas del portafolio
+                portfolio_type = config['portfolio_type']
+                
+                # Determinar combinaciones a usar
+                if portfolio_type == "elite" and s73_results.get('elite_combinations') is not None:
+                    combinations = s73_results['elite_combinations']
+                    combo_probs = s73_results.get('elite_probabilities', s73_results['probabilities'][:len(combinations)])
+                    combo_stakes = s73_results['kelly_stakes'][:len(combinations)]
+                    strategy_name = "Portafolio Elite"
+                else:
+                    combinations = s73_results['combinations']
+                    combo_probs = s73_results['probabilities']
+                    combo_stakes = s73_results['kelly_stakes']
+                    strategy_name = "Portafolio Completo"
+                
+                # Calcular métricas básicas
+                total_exposure = np.sum(combo_stakes) * 100
+                total_investment = total_exposure * config['bankroll'] / 100
+                avg_stake = np.mean(combo_stakes) * 100
+                
+                # Mostrar métricas
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Estrategia", strategy_name)
+                
+                with col2:
+                    st.metric("Exposición Total", f"{total_exposure:.2f}%")
+                
+                with col3:
+                    st.metric("Inversión Total", f"€{total_investment:,.2f}")
+                
+                with col4:
+                    st.metric("Stake Promedio", f"{avg_stake:.2f}%")
+                
+                # Gráfico de distribución de stakes
+                st.subheader("📈 Distribución de Stakes")
+                
+                fig_stakes = go.Figure()
+                fig_stakes.add_trace(go.Bar(
+                    x=[f"Col {i+1}" for i in range(len(combo_stakes))],
+                    y=combo_stakes * 100,
+                    marker_color=SystemConfig.COLORS['primary'],
+                    opacity=0.7,
+                    name='Stake (%)'
+                ))
+                
+                fig_stakes.update_layout(
+                    title="Distribución de Stakes por Columna",
+                    xaxis_title="Columna",
+                    yaxis_title="Stake (%)",
+                    height=400
+                )
+                
+                st.plotly_chart(fig_stakes, use_container_width=True)
+                
+                # Recomendaciones de riesgo
+                st.subheader("🎯 Recomendaciones de Gestión")
+                
+                if total_exposure > 20:
+                    st.error("""
+                    **❌ ALTO RIESGO - Exposición > 20%**
+                    
+                    Recomendaciones:
+                    1. Reducir exposición inmediatamente a <15%
+                    2. Revisar fracción de Kelly
+                    3. Considerar aumentar el número de columnas
+                    """)
+                elif total_exposure > 15:
+                    st.warning("""
+                    **⚠️ RIESGO MODERADO - Exposición 15-20%**
+                    
+                    Recomendaciones:
+                    1. Monitorear exposición diariamente
+                    2. Considerar reducir fracción de Kelly
+                    3. Evaluar performance semanalmente
+                    """)
+                else:
+                    st.success("""
+                    **✅ RIESGO CONTROLADO - Exposición < 15%**
+                    
+                    El portafolio está dentro de límites seguros.
+                    Continuar con la estrategia actual.
+                    """)
+        
+        # ============================================================================
+        # PESTAÑA 5: RESUMEN EJECUTIVO
+        # ============================================================================
+        with tab5:
+            st.header("📋 Resumen Ejecutivo v3.0")
+            
+            # Estado del sistema
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Versión", "v3.0")
+            
+            with col2:
+                status = "✅ Activo" if st.session_state.get('s73_executed', False) else "⏳ Pendiente"
+                st.metric("Estado Sistema", status)
+            
+            with col3:
+                portfolio_display = "Elite (24)" if config['portfolio_type'] == 'elite' else "Full (73)"
+                st.metric("Portafolio", portfolio_display)
+            
+            with col4:
+                if config['apply_elite_reduction']:
+                    st.metric("Reducción Elite", "✅ Aplicada")
+                else:
+                    st.metric("Reducción Elite", "⏸️ No aplicada")
+            
+            # Resumen de métricas
+            st.subheader("📊 Métricas del Sistema")
+            
+            if st.session_state.get('s73_results') and st.session_state.get('backtest_results'):
+                s73_results = st.session_state.s73_results
+                backtest_results = st.session_state.backtest_results
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**Sistema S73:**")
+                    st.write(f"- Columnas generadas: {s73_results['final_count']}")
+                    st.write(f"- Exposición total: {np.sum(s73_results['kelly_stakes']) * 100:.2f}%")
+                    st.write(f"- Probabilidad promedio: {np.mean(s73_results['probabilities']) * 100:.2f}%")
+                
+                with col2:
+                    st.write("**Backtesting:**")
+                    metrics = backtest_results['final_metrics']
+                    st.write(f"- ROI total: {metrics['total_return_pct']:+.2f}%")
+                    st.write(f"- Sharpe Ratio: {metrics['sharpe_ratio']:.2f}")
+                    st.write(f"- Max Drawdown: {metrics['max_drawdown']:.2f}%")
+                
+                # Calificación final
+                st.subheader("🏆 Calificación del Sistema")
+                
+                # Calcular score (simplificado)
+                roi_score = min(max(metrics['total_return_pct'] + 50, 0), 100)
+                sharpe_score = min(max(metrics['sharpe_ratio'] * 50, 0), 100)
+                dd_score = 100 - min(max(metrics['max_drawdown'], 0), 100)
+                
+                overall_score = (roi_score * 0.4 + sharpe_score * 0.3 + dd_score * 0.3)
+                
+                # Determinar calificación
+                if overall_score >= 85:
+                    rating = "A+"
+                    color = "#4CAF50"
+                    description = "Excelente"
+                elif overall_score >= 70:
+                    rating = "B+"
+                    color = "#8BC34A"
+                    description = "Muy Bueno"
+                elif overall_score >= 55:
+                    rating = "C+"
+                    color = "#FFC107"
+                    description = "Bueno"
+                elif overall_score >= 40:
+                    rating = "D"
+                    color = "#FF9800"
+                    description = "Aceptable"
+                else:
+                    rating = "F"
+                    color = "#F44336"
+                    description = "Mejorable"
+                
+                # Mostrar calificación
+                st.markdown(f"""
+                <div style="
+                    background-color: {color}20;
+                    border-left: 5px solid {color};
+                    padding: 20px;
+                    border-radius: 10px;
+                    text-align: center;
+                    margin: 10px 0;
+                ">
+                    <h1 style="color: {color}; margin: 0; font-size: 48px;">{rating}</h1>
+                    <p style="color: {color}; font-weight: bold; margin: 5px 0;">{description}</p>
+                    <p style="color: #666; font-size: 14px;">Score: {overall_score:.1f}/100</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Botones de acción
+                st.subheader("🚀 Acciones")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if st.button("📄 Generar Reporte", use_container_width=True, key="generate_report_button"):
+                        st.info("✅ Reporte generado (función simulada)")
+                
+                with col2:
+                    if st.button("💾 Exportar Datos", use_container_width=True, key="export_data_button"):
+                        st.info("✅ Datos exportados (función simulada)")
+                
+                with col3:
+                    if st.button("🔄 Nuevo Análisis", use_container_width=True, key="new_analysis_button"):
+                        SessionStateManager.reset_to_input()
+                        st.rerun()
+            
+            else:
+                st.info("👆 Completa las pestañas anteriores para ver el resumen ejecutivo.")
+
+# ============================================================================
+# EJECUCIÓN
+# ============================================================================
 
 if __name__ == "__main__":
-    # Importar módulos necesarios
-    import time
+    # Asegurar imports necesarios
     import pandas as pd
     import numpy as np
     import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-    import io
     from datetime import datetime
     
-    # Ejecutar aplicación principal
+    # Ejecutar aplicación
     main()
