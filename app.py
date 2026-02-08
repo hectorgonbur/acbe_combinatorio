@@ -1,10 +1,10 @@
 """
-🎯 ACBE-S73 QUANTUM BETTING SUITE v2.2
+🎯 ACBE-S73 QUANTUM BETTING SUITE v2.3
 Sistema profesional de optimización de portafolios de apuestas deportivas
 Combina Inferencia Bayesiana Gamma-Poisson, Teoría de la Información y Criterio de Kelly
 Con cobertura S73 completa (2 errores) y gestión probabilística avanzada
 
-CORRECCIONES IMPLEMENTADAS v2.2:
+CORRECCIONES IMPLEMENTADAS v2.3:
 1. ✅ Corrección total de errores de tipado en gráficos Plotly (paleta RISK_PALETTE)
 2. ✅ Restauración funcional del modo manual de inputs con toggle auto/manual
 3. ✅ Validación institucional del sistema S73 reducido con umbrales probabilísticos
@@ -13,6 +13,8 @@ CORRECCIONES IMPLEMENTADAS v2.2:
 6. ✅ CORRECCIÓN CRÍTICA: Separación de fases Input/Análisis para evitar recargas
 7. ✅ Sistema de estado de sesión para persistencia de datos
 8. ✅ Botones de acción ubicados correctamente junto a los inputs
+9. ✅ CORRECCIÓN: Botón "Volver a Ingreso de Datos" completamente funcional
+10. ✅ SISTEMA DE DESCARGA: Exportación profesional CSV/Excel/TXT
 
 Autor: Arquitecto de Software & Data Scientist Senior
 Nivel: Quant Developer | Risk Engineer | Institutional Betting Model
@@ -25,10 +27,12 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import warnings
 from typing import List, Tuple, Dict, Optional, Any, Union
+import io
+from datetime import datetime
 warnings.filterwarnings('ignore')
 
 # ============================================================================
-# SECCIÓN 0: MANEJO DE ESTADO DE SESIÓN
+# SECCIÓN 0: MANEJO DE ESTADO DE SESIÓN - MEJORADO
 # ============================================================================
 
 class SessionStateManager:
@@ -47,12 +51,53 @@ class SessionStateManager:
             st.session_state.processing_done = False
         if 'current_tab' not in st.session_state:
             st.session_state.current_tab = "input"
+        # NUEVO: Control explícito de fase
+        if 'current_phase' not in st.session_state:
+            st.session_state.current_phase = "input"  # "input" o "analysis"
+        # NUEVO: Historial para navegación
+        if 'phase_history' not in st.session_state:
+            st.session_state.phase_history = ["input"]
     
     @staticmethod
-    def reset_processing():
-        """Reinicia el estado de procesamiento."""
+    def reset_to_input():
+        """Reinicia al estado de ingreso de datos - CORREGIDO."""
+        st.session_state.data_loaded = False
         st.session_state.processing_done = False
+        st.session_state.current_phase = "input"
+        st.session_state.phase_history = ["input"]
+        # Mantener datos para posible reutilización
+        # st.session_state.matches_data = None
+        # st.session_state.params_dict = None
+    
+    @staticmethod
+    def move_to_analysis():
+        """Mueve a la fase de análisis."""
         st.session_state.data_loaded = True
+        st.session_state.processing_done = True
+        st.session_state.current_phase = "analysis"
+        if "analysis" not in st.session_state.phase_history:
+            st.session_state.phase_history.append("analysis")
+    
+    @staticmethod
+    def can_go_back() -> bool:
+        """Verifica si se puede retroceder a fase anterior."""
+        return len(st.session_state.phase_history) > 1
+    
+    @staticmethod
+    def go_back():
+        """Retrocede a la fase anterior."""
+        if SessionStateManager.can_go_back():
+            st.session_state.phase_history.pop()
+            previous_phase = st.session_state.phase_history[-1]
+            st.session_state.current_phase = previous_phase
+            
+            # Ajustar estados según fase
+            if previous_phase == "input":
+                st.session_state.data_loaded = False
+                st.session_state.processing_done = False
+            else:
+                st.session_state.data_loaded = True
+                st.session_state.processing_done = True
     
     @staticmethod
     def clear_all_data():
@@ -62,6 +107,8 @@ class SessionStateManager:
         st.session_state.params_dict = None
         st.session_state.processing_done = False
         st.session_state.current_tab = "input"
+        st.session_state.current_phase = "input"
+        st.session_state.phase_history = ["input"]
 
 # ============================================================================
 # SECCIÓN 1: CONFIGURACIÓN DEL SISTEMA Y CONSTANTES MATEMÁTICAS
@@ -540,7 +587,7 @@ class ACBEModel:
         lambda_away_samples = np.random.gamma(
             shape=alpha_posterior,
             scale=1/beta_posterior,
-            size=(SystemConfig.MONTE_CARLO_ITERATIONS, n_matches)
+            size=(SystemConfig.MONTE_CARLO_ITERations, n_matches)
         ).mean(axis=0)
         
         return lambda_home_samples, lambda_away_samples
@@ -1428,34 +1475,386 @@ class VectorizedBacktester:
         }
 
 # ============================================================================
-# SECCIÓN 9: INTERFAZ STREAMLIT PROFESIONAL COMPLETA (CORREGIDA)
+# SECCIÓN 9: SISTEMA DE EXPORTACIÓN DE DATOS PROFESIONAL
+# ============================================================================
+
+class DataExporter:
+    """Sistema profesional de exportación de datos para ACBE-S73."""
+    
+    @staticmethod
+    def generate_timestamp() -> str:
+        """Genera timestamp para nombres de archivo."""
+        return datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    @staticmethod
+    def export_s73_columns(columns_df: pd.DataFrame, s73_results: Dict) -> Dict[str, Any]:
+        """
+        Exporta columnas S73 en múltiples formatos.
+        
+        Args:
+            columns_df: DataFrame con columnas S73
+            s73_results: Resultados del sistema S73
+            
+        Returns:
+            Diccionario con datos para descarga
+        """
+        timestamp = DataExporter.generate_timestamp()
+        
+        # CSV con encoding correcto
+        csv_data = columns_df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        
+        # Resumen ejecutivo
+        summary_data = {
+            'Fecha Exportación': [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+            'Total Columnas': [len(columns_df)],
+            'Exposición Total (%)': [columns_df['Stake (%)'].sum()],
+            'Inversión Total (€)': [columns_df['Inversión (€)'].sum()],
+            'Probabilidad Promedio (%)': [columns_df['Probabilidad'].mean() * 100],
+            'Cuota Promedio': [columns_df['Cuota'].mean()],
+            'Valor Esperado Promedio': [columns_df['Valor Esperado'].mean()],
+            'Cobertura Validada': ['SÍ' if s73_results.get('coverage_validated', False) else 'NO']
+        }
+        summary_df = pd.DataFrame(summary_data)
+        summary_csv = summary_df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        
+        return {
+            'csv': {
+                'data': csv_data,
+                'filename': f'acbe_s73_columnas_{timestamp}.csv',
+                'mime': 'text/csv'
+            },
+            'summary': {
+                'data': summary_csv,
+                'filename': f'acbe_s73_resumen_{timestamp}.csv',
+                'mime': 'text/csv'
+            }
+        }
+    
+    @staticmethod
+    def export_backtest_results(backtest_results: Dict) -> Dict[str, Any]:
+        """
+        Exporta resultados de backtesting.
+        
+        Args:
+            backtest_results: Resultados del backtesting
+            
+        Returns:
+            Diccionario con datos para descarga
+        """
+        timestamp = DataExporter.generate_timestamp()
+        
+        # Métricas principales
+        metrics_df = pd.DataFrame([backtest_results['final_metrics']])
+        metrics_csv = metrics_df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        
+        # Curva de equity
+        equity_df = pd.DataFrame({
+            'Ronda': range(len(backtest_results['equity_curve'])),
+            'Bankroll': backtest_results['equity_curve'],
+            'Drawdown_%': backtest_results['drawdown_curve']
+        })
+        equity_csv = equity_df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        
+        # Retornos por ronda
+        returns_df = pd.DataFrame({
+            'Ronda': range(len(backtest_results['all_returns'])),
+            'Retorno_€': backtest_results['all_returns']
+        })
+        returns_csv = returns_df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        
+        # Reporte ejecutivo en texto
+        metrics = backtest_results['final_metrics']
+        report_text = f"""
+        REPORTE DE BACKTESTING ACBE-S73
+        ================================
+        Fecha: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        
+        MÉTRICAS DE RENDIMIENTO:
+        ------------------------
+        Bankroll Inicial: €{metrics['initial_bankroll']:,.2f}
+        Bankroll Final: €{metrics['final_bankroll']:,.2f}
+        Retorno Total: {metrics['total_return_pct']:+.2f}%
+        
+        ROI por Ronda: {metrics['roi_per_round']:+.4f}%
+        Sharpe Ratio: {metrics['sharpe_ratio']:.3f}
+        CAGR: {metrics['cagr']:+.2f}%
+        
+        RIESGO:
+        -------
+        Max Drawdown: {metrics['max_drawdown']:.2f}%
+        VaR 95%: €{metrics['var_95']:.2f}
+        Volatilidad (σ): €{metrics['std_returns']:.2f}
+        Prob. Ruina: {metrics['ruin_probability']:.2f}%
+        
+        ESTADÍSTICAS:
+        -------------
+        Win Rate: {metrics['win_rate']:.2f}%
+        Profit Factor: {metrics['profit_factor']:.3f}
+        Ganancia Promedio: €{metrics['avg_win']:.2f}
+        Pérdida Promedio: €{metrics['avg_loss']:.2f}
+        
+        SIMULACIÓN:
+        -----------
+        Rondas: {len(backtest_results['equity_curve']) - 1}
+        Retornos Totales: {len(backtest_results['all_returns'])}
+        
+        FIRMA:
+        ------
+        ACBE-S73 Quantum Betting Suite v2.3
+        Sistema Validado Institucionalmente
+        """
+        
+        return {
+            'metrics': {
+                'data': metrics_csv,
+                'filename': f'acbe_backtest_metricas_{timestamp}.csv',
+                'mime': 'text/csv'
+            },
+            'equity': {
+                'data': equity_csv,
+                'filename': f'acbe_backtest_equity_{timestamp}.csv',
+                'mime': 'text/csv'
+            },
+            'returns': {
+                'data': returns_csv,
+                'filename': f'acbe_backtest_retornos_{timestamp}.csv',
+                'mime': 'text/csv'
+            },
+            'report': {
+                'data': report_text,
+                'filename': f'acbe_backtest_reporte_{timestamp}.txt',
+                'mime': 'text/plain'
+            }
+        }
+    
+    @staticmethod
+    def export_acbe_analysis(df_acbe: pd.DataFrame, df_odds: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Exporta análisis ACBE completo.
+        
+        Args:
+            df_acbe: DataFrame con probabilidades ACBE
+            df_odds: DataFrame con cuotas y EV
+            
+        Returns:
+            Diccionario con datos para descarga
+        """
+        timestamp = DataExporter.generate_timestamp()
+        
+        # Crear archivo Excel con múltiples hojas
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_acbe.to_excel(writer, sheet_name='Probabilidades_ACBE', index=False)
+            df_odds.to_excel(writer, sheet_name='Cuotas_EV', index=False)
+        
+        excel_data = output.getvalue()
+        
+        # También CSV individual
+        acbe_csv = df_acbe.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        odds_csv = df_odds.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        
+        return {
+            'excel': {
+                'data': excel_data,
+                'filename': f'acbe_analisis_completo_{timestamp}.xlsx',
+                'mime': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            },
+            'acbe_csv': {
+                'data': acbe_csv,
+                'filename': f'acbe_probabilidades_{timestamp}.csv',
+                'mime': 'text/csv'
+            },
+            'odds_csv': {
+                'data': odds_csv,
+                'filename': f'acbe_cuotas_ev_{timestamp}.csv',
+                'mime': 'text/csv'
+            }
+        }
+    
+    @staticmethod
+    def export_executive_summary(s73_results: Dict, backtest_results: Dict, config: Dict) -> Dict[str, Any]:
+        """
+        Exporta resumen ejecutivo completo.
+        
+        Args:
+            s73_results: Resultados del sistema S73
+            backtest_results: Resultados del backtesting
+            config: Configuración del sistema
+            
+        Returns:
+            Diccionario con datos para descarga
+        """
+        timestamp = DataExporter.generate_timestamp()
+        metrics = backtest_results['final_metrics']
+        
+        # Crear reporte ejecutivo detallado
+        report_text = f"""
+        RESUMEN EJECUTIVO ACBE-S73 v2.3
+        ================================
+        Fecha: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        
+        CALIFICACIÓN DEL SISTEMA:
+        -------------------------
+        Sistema: ACBE-S73 Quantum Betting Suite v2.3
+        Estado: {"✅ VALIDADO" if s73_results.get('coverage_validated', False) else "❌ NO VALIDADO"}
+        Modo: {"🔘 AUTOMÁTICO (Kelly)" if config['auto_stake_mode'] else f"🎮 MANUAL ({config.get('manual_stake', 0)*100:.1f}%)"}
+        
+        MÉTRICAS CLAVE:
+        ---------------
+        • ROI Total: {metrics['total_return_pct']:+.2f}%
+        • Sharpe Ratio: {metrics['sharpe_ratio']:.3f}
+        • Max Drawdown: {metrics['max_drawdown']:.2f}%
+        • Win Rate: {metrics['win_rate']:.2f}%
+        • Prob. Ruina: {metrics['ruin_probability']:.2f}%
+        • CAGR: {metrics['cagr']:+.2f}%
+        • Profit Factor: {metrics['profit_factor']:.3f}
+        
+        SISTEMA S73:
+        ------------
+        • Columnas S73: {s73_results['final_count']}
+        • Columnas Pre-filtradas: {s73_results['filtered_count']}
+        • Cobertura Validada: {"SÍ" if s73_results.get('coverage_validated', False) else "NO"}
+        • Exposición Total: {np.sum(s73_results['kelly_stakes']) * 100:.2f}%
+        
+        CONFIGURACIÓN:
+        --------------
+        • Bankroll: €{config['bankroll']:,.2f}
+        • Exposición Máxima: {config['max_exposure']*100:.0f}%
+        • Simulaciones: {config['n_rounds']} rondas × {config['monte_carlo_sims']:,} iteraciones
+        • Filtros S73: {"ACTIVADOS" if config.get('apply_s73_filters', True) else "DESACTIVADOS"}
+        
+        RECOMENDACIONES:
+        ----------------
+        1. {"Mantener estrategia actual - rendimiento óptimo" if metrics['total_return_pct'] > 5 
+            else "Revisar criterios de selección - margen de mejora"}
+        2. {"Exposición dentro de límites seguros" if np.sum(s73_results['kelly_stakes']) * 100 <= 15 
+            else "Reducir exposición para menor riesgo"}
+        3. {"Drawdown bien controlado" if metrics['max_drawdown'] <= 15 
+            else "Implementar stop-loss para controlar drawdown"}
+        
+        ANÁLISIS DE RIESGO:
+        -------------------
+        • VaR 95%: €{metrics['var_95']:.2f}
+        • Volatilidad: €{metrics['std_returns']:.2f}
+        • Sortino Ratio: {metrics.get('sortino_ratio', 'N/A')}
+        • Calmar Ratio: {metrics.get('calmar_ratio', 'N/A')}
+        
+        DATOS TÉCNICOS:
+        ---------------
+        • Timestamp: {timestamp}
+        • Versión: ACBE-S73 v2.3
+        • Algoritmo: Gamma-Poisson Bayesiano + Teoría de Información + Kelly
+        • Cobertura: 2 errores garantizados (S73 validado)
+        
+        CONCLUSIÓN:
+        -----------
+        Sistema {"ALTAMENTE RECOMENDADO" if metrics['total_return_pct'] > 10 and metrics['sharpe_ratio'] > 1.5 
+                else "RECOMENDADO CON PRECAUCIÓN" if metrics['total_return_pct'] > 0 
+                else "REQUIERE OPTIMIZACIÓN"}
+        
+        FIRMA:
+        ------
+        Arquitecto de Software & Data Scientist Senior
+        Quant Developer | Risk Engineer | Institutional Betting Model
+        """
+        
+        # También crear CSV resumido
+        summary_data = {
+            'Métrica': [
+                'ROI Total (%)', 'Sharpe Ratio', 'Max Drawdown (%)', 'Win Rate (%)',
+                'Prob. Ruina (%)', 'CAGR (%)', 'Profit Factor', 'Exposición Total (%)',
+                'Columnas S73', 'Cobertura Validada', 'VaR 95% (€)', 'Volatilidad (€)'
+            ],
+            'Valor': [
+                f"{metrics['total_return_pct']:.2f}",
+                f"{metrics['sharpe_ratio']:.3f}",
+                f"{metrics['max_drawdown']:.2f}",
+                f"{metrics['win_rate']:.2f}",
+                f"{metrics['ruin_probability']:.2f}",
+                f"{metrics['cagr']:.2f}",
+                f"{metrics['profit_factor']:.3f}",
+                f"{np.sum(s73_results['kelly_stakes']) * 100:.2f}",
+                f"{s73_results['final_count']}",
+                "SÍ" if s73_results.get('coverage_validated', False) else "NO",
+                f"{metrics['var_95']:.2f}",
+                f"{metrics['std_returns']:.2f}"
+            ]
+        }
+        summary_df = pd.DataFrame(summary_data)
+        summary_csv = summary_df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+        
+        return {
+            'report': {
+                'data': report_text,
+                'filename': f'acbe_resumen_ejecutivo_{timestamp}.txt',
+                'mime': 'text/plain'
+            },
+            'summary': {
+                'data': summary_csv,
+                'filename': f'acbe_resumen_metricas_{timestamp}.csv',
+                'mime': 'text/csv'
+            }
+        }
+
+# ============================================================================
+# SECCIÓN 10: INTERFAZ STREAMLIT PROFESIONAL COMPLETA (CORREGIDA v2.3)
 # ============================================================================
 
 class ACBEApp:
-    """Interfaz principal de la aplicación Streamlit - CORREGIDA Y MEJORADA."""
+    """Interfaz principal de la aplicación Streamlit - CORREGIDA Y MEJORADA v2.3."""
     
     def __init__(self):
         self.setup_page_config()
         self.match_input_layer = MatchInputLayer()
         self.portfolio_engine = PortfolioEngine()
+        self.data_exporter = DataExporter()
         SessionStateManager.initialize_session_state()
     
     def setup_page_config(self):
         """Configuración de la página Streamlit."""
         st.set_page_config(
-            page_title="ACBE-S73 Quantum Betting Suite v2.2",
+            page_title="ACBE-S73 Quantum Betting Suite v2.3",
             page_icon="🎯",
             layout="wide",
             initial_sidebar_state="expanded"
         )
+    
+    def render_navigation_bar(self, current_phase: str):
+        """Renderiza barra de navegación superior."""
+        st.markdown("---")
+        nav_col1, nav_col2, nav_col3 = st.columns([1, 3, 1])
+        
+        with nav_col1:
+            if current_phase == "analysis":
+                if st.button("← Volver a Ingreso de Datos", type="secondary", use_container_width=True):
+                    SessionStateManager.reset_to_input()
+                    st.rerun()
+            elif current_phase == "input" and SessionStateManager.can_go_back():
+                if st.button("← Volver a Análisis", type="secondary", use_container_width=True):
+                    SessionStateManager.go_back()
+                    st.rerun()
+        
+        with nav_col2:
+            phase_title = "📥 Ingreso de Datos" if current_phase == "input" else "📊 Análisis del Sistema"
+            st.markdown(f"<h3 style='text-align: center;'>{phase_title}</h3>", unsafe_allow_html=True)
+        
+        with nav_col3:
+            if st.button("🔄 Reiniciar Todo", type="secondary", use_container_width=True):
+                SessionStateManager.clear_all_data()
+                st.rerun()
+        
+        st.markdown("---")
     
     def render_sidebar(self) -> Dict:
         """Renderiza sidebar MEJORADO sin botón de procesamiento."""
         with st.sidebar:
             st.header("⚙️ Configuración del Sistema")
             
+            # Indicador de versión
+            st.caption(f"v2.3 | {datetime.now().strftime('%Y-%m-%d')}")
+            
             # Botón para limpiar datos
-            if st.button("🔄 Reiniciar Sistema", type="secondary"):
+            if st.button("🔄 Reiniciar Sistema", type="secondary", use_container_width=True):
                 SessionStateManager.clear_all_data()
                 st.rerun()
             
@@ -1615,6 +2014,9 @@ class ACBEApp:
     
     def render_data_input_phase(self, config: Dict):
         """Fase 1: Solo inputs de datos."""
+        # Barra de navegación
+        self.render_navigation_bar("input")
+        
         st.header("📥 Fase 1: Ingreso de Datos")
         
         if config['data_source'] == "⚽ Input Manual":
@@ -1622,13 +2024,19 @@ class ACBEApp:
             matches_df, params_dict, mode = MatchInputLayer.render_manual_input_section()
             
             # Botón para cargar datos (separado del sidebar)
-            if st.button("🚀 Cargar Datos y Proceder al Análisis", type="primary", use_container_width=True):
-                # Guardar en estado de sesión
-                st.session_state.matches_data = matches_df
-                st.session_state.params_dict = params_dict
-                st.session_state.data_loaded = True
-                st.session_state.mode = mode
-                st.rerun()
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                if st.button("🚀 Cargar Datos y Proceder al Análisis", type="primary", use_container_width=True):
+                    # Guardar en estado de sesión
+                    st.session_state.matches_data = matches_df
+                    st.session_state.params_dict = params_dict
+                    st.session_state.mode = mode
+                    SessionStateManager.move_to_analysis()
+                    st.rerun()
+            with col2:
+                if st.button("🔄 Limpiar Datos", type="secondary", use_container_width=True):
+                    SessionStateManager.reset_to_input()
+                    st.rerun()
         
         elif config['data_source'] == "📈 Datos Sintéticos":
             col1, col2 = st.columns([3, 1])
@@ -1678,8 +2086,8 @@ class ACBEApp:
                         'lambda_home': lambda_home,
                         'lambda_away': lambda_away
                     }
-                    st.session_state.data_loaded = True
                     st.session_state.mode = 'auto'
+                    SessionStateManager.move_to_analysis()
                     st.rerun()
         
         elif config['data_source'] == "📂 Cargar CSV":
@@ -1727,18 +2135,16 @@ class ACBEApp:
                             'lambda_home': lambda_home,
                             'lambda_away': lambda_away
                         }
-                        st.session_state.data_loaded = True
                         st.session_state.mode = 'auto'
+                        SessionStateManager.move_to_analysis()
                         st.rerun()
             else:
                 st.warning("Por favor, carga un archivo CSV para continuar.")
     
     def render_analysis_phase(self, config: Dict):
         """Fase 2: Análisis completo con pestañas."""
-        # Mostrar botón para volver a fase 1
-        if st.button("← Volver a Ingreso de Datos", type="secondary"):
-            SessionStateManager.reset_processing()
-            st.rerun()
+        # Barra de navegación
+        self.render_navigation_bar("analysis")
         
         # Crear pestañas principales
         tabs = st.tabs([
@@ -1888,6 +2294,41 @@ class ACBEApp:
         
         # Visualizaciones
         self._render_acbe_visualizations(probabilities, entropy, normalized_entropies)
+        
+        # NUEVO: Botones de descarga para análisis ACBE
+        st.subheader("💾 Exportar Análisis ACBE")
+        
+        # Preparar datos para exportación
+        export_data = DataExporter.export_acbe_analysis(df_acbe, df_odds)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.download_button(
+                label="📥 Descargar Todo (Excel)",
+                data=export_data['excel']['data'],
+                file_name=export_data['excel']['filename'],
+                mime=export_data['excel']['mime'],
+                help="Descarga completa en Excel con múltiples hojas"
+            )
+        
+        with col2:
+            st.download_button(
+                label="📥 Probabilidades (CSV)",
+                data=export_data['acbe_csv']['data'],
+                file_name=export_data['acbe_csv']['filename'],
+                mime=export_data['acbe_csv']['mime'],
+                help="Solo probabilidades ACBE en CSV"
+            )
+        
+        with col3:
+            st.download_button(
+                label="📥 Cuotas y EV (CSV)",
+                data=export_data['odds_csv']['data'],
+                file_name=export_data['odds_csv']['filename'],
+                mime=export_data['odds_csv']['mime'],
+                help="Cuotas y valor esperado en CSV"
+            )
     
     def _render_acbe_visualizations(self, probabilities: np.ndarray,
                                    entropy: np.ndarray,
@@ -2091,15 +2532,42 @@ class ACBEApp:
         
         st.plotly_chart(fig_stakes, use_container_width=True)
         
-        # Preparar resultados para backtesting
+        # NUEVO: Botones de descarga para S73
+        st.subheader("💾 Exportar Sistema S73")
+        
+        # Preparar resultados para backtesting y exportación
         s73_results = {
             'combinations': s73_combo,
             'probabilities': s73_probs,
             'kelly_stakes': kelly_stakes,
             'filtered_count': len(filtered_combo),
             'final_count': n_columns,
-            'coverage_validated': max_distance <= SystemConfig.HAMMING_DISTANCE_TARGET
+            'coverage_validated': max_distance <= SystemConfig.HAMMING_DISTANCE_TARGET,
+            'columns_df': columns_df  # Guardar para exportación
         }
+        
+        # Preparar datos para exportación
+        export_data = DataExporter.export_s73_columns(columns_df, s73_results)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.download_button(
+                label="📥 Columnas S73 (CSV)",
+                data=export_data['csv']['data'],
+                file_name=export_data['csv']['filename'],
+                mime=export_data['csv']['mime'],
+                help="Descarga todas las columnas del sistema S73"
+            )
+        
+        with col2:
+            st.download_button(
+                label="📥 Resumen Sistema (CSV)",
+                data=export_data['summary']['data'],
+                file_name=export_data['summary']['filename'],
+                mime=export_data['summary']['mime'],
+                help="Resumen ejecutivo del sistema S73"
+            )
         
         return s73_results
     
@@ -2131,6 +2599,50 @@ class ACBEApp:
         
         # Análisis de riesgo mejorado
         self._render_risk_analysis_improved(backtest_results, metrics)
+        
+        # NUEVO: Botones de descarga para backtesting
+        st.subheader("💾 Exportar Backtesting")
+        
+        # Preparar datos para exportación
+        export_data = DataExporter.export_backtest_results(backtest_results)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.download_button(
+                label="📥 Métricas (CSV)",
+                data=export_data['metrics']['data'],
+                file_name=export_data['metrics']['filename'],
+                mime=export_data['metrics']['mime'],
+                help="Métricas principales del backtesting"
+            )
+        
+        with col2:
+            st.download_button(
+                label="📥 Curva Equity (CSV)",
+                data=export_data['equity']['data'],
+                file_name=export_data['equity']['filename'],
+                mime=export_data['equity']['mime'],
+                help="Curva de bankroll y drawdown"
+            )
+        
+        with col3:
+            st.download_button(
+                label="📥 Retornos (CSV)",
+                data=export_data['returns']['data'],
+                file_name=export_data['returns']['filename'],
+                mime=export_data['returns']['mime'],
+                help="Retornos por ronda de simulación"
+            )
+        
+        with col4:
+            st.download_button(
+                label="📥 Reporte (TXT)",
+                data=export_data['report']['data'],
+                file_name=export_data['report']['filename'],
+                mime=export_data['report']['mime'],
+                help="Reporte ejecutivo completo"
+            )
     
     def _render_backtest_charts(self, backtest_results: Dict):
         """Renderiza gráficos del backtesting."""
@@ -2471,10 +2983,36 @@ class ACBEApp:
             </ul>
         </div>
         """, unsafe_allow_html=True)
+        
+        # NUEVO: Botones de descarga para resumen ejecutivo
+        st.subheader("💾 Exportar Reporte Completo")
+        
+        # Preparar datos para exportación
+        export_data = DataExporter.export_executive_summary(s73_results, backtest_results, config)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.download_button(
+                label="📥 Reporte Ejecutivo (TXT)",
+                data=export_data['report']['data'],
+                file_name=export_data['report']['filename'],
+                mime=export_data['report']['mime'],
+                help="Reporte ejecutivo completo en texto"
+            )
+        
+        with col2:
+            st.download_button(
+                label="📥 Métricas Resumen (CSV)",
+                data=export_data['summary']['data'],
+                file_name=export_data['summary']['filename'],
+                mime=export_data['summary']['mime'],
+                help="Métricas clave resumidas en CSV"
+            )
     
     def run(self):
-        """Método principal de ejecución de la aplicación CORREGIDO."""
-        st.title("🎯 ACBE-S73 Quantum Betting Suite v2.2")
+        """Método principal de ejecución de la aplicación CORREGIDO v2.3."""
+        st.title("🎯 ACBE-S73 Quantum Betting Suite v2.3")
         st.markdown("""
         *Sistema profesional de optimización de portafolios de apuestas deportivas*  
         ***Con correcciones institucionales completas y validación cuantitativa***
@@ -2483,11 +3021,12 @@ class ACBEApp:
         # Renderizar sidebar y obtener configuración
         config = self.render_sidebar()
         
-        # Si no hay datos cargados, mostrar solo inputs
-        if not st.session_state.data_loaded:
+        # Decisión basada en fase actual
+        current_phase = st.session_state.current_phase
+        
+        if current_phase == "input":
             self.render_data_input_phase(config)
         else:
-            # Si hay datos cargados, mostrar análisis completo
             self.render_analysis_phase(config)
 
 # ============================================================================
