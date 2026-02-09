@@ -6045,12 +6045,12 @@ class ACBEProfessionalApp:
                 st.success("✅ Datos cargados")
     
     def render_analysis_phase(self, config: Dict):
-        """Fase 2: Análisis completo."""
+        """Fase 2: Análisis completo con pestañas - CORREGIDO."""
         # Verificar que hay datos cargados
         if not st.session_state.get('data_loaded', False):
             st.error("❌ No hay datos cargados. Vuelve a la fase de input.")
             return
-        
+
         # Extraer datos CORRECTAMENTE
         matches_data = st.session_state.get('matches_data', {})
         if not matches_data:
@@ -6060,11 +6060,11 @@ class ACBEProfessionalApp:
         probabilities = matches_data.get('probabilities')
         odds_matrix = matches_data.get('odds_matrix')
         normalized_entropies = matches_data.get('normalized_entropies')
-        
+
         if probabilities is None or odds_matrix is None:
             st.error("❌ Datos incompletos. Faltan probabilidades o cuotas")
             return
-        
+
         # Pestañas principales
         tabs = st.tabs([
             "📊 Análisis ACBE",
@@ -6073,41 +6073,54 @@ class ACBEProfessionalApp:
             "📈 Backtesting",
             "💾 Exportar"
         ])
-        
-        # Variables para compartir resultados entre pestañas
-        s73_results = None
-        elite_results = None
-        backtest_results = None
-        
+
+        # --- GESTIÓN DE VARIABLES DE ESTADO ---
+        # Intentar recuperar resultados S73 del estado de sesión si existen
+        s73_results = st.session_state.get('s73_results')
+        elite_results = st.session_state.get('elite_results')
+        backtest_results = st.session_state.get('backtest_results')
+
         # ===== PESTAÑA 1: ANÁLISIS ACBE =====
         with tabs[0]:
-            s73_results = self.render_acbe_analysis(
+            # CORRECCIÓN: No asignamos esto a s73_results. Son datos ACBE.
+            self.render_acbe_analysis(
                 probabilities, odds_matrix, normalized_entropies, config
             )
-        
+
         # ===== PESTAÑA 2: SISTEMA S73 =====
         with tabs[1]:
+            # Si no hay resultados previos, mostrar botón o generar
             if s73_results is None:
-                s73_results = self.generate_s73_system(
-                    probabilities, odds_matrix, normalized_entropies, config
-                )
-            
-            self.render_s73_system_detailed(s73_results, config)
-        
+                st.info("El sistema S73 no ha sido generado aún.")
+                if st.button("⚙️ Generar Sistema S73 (Cobertura 2 Errores)", type="primary"):
+                    s73_results = self.generate_s73_system(
+                        probabilities, odds_matrix, normalized_entropies, config
+                    )
+                    # Forzar recarga para actualizar la UI
+                    st.rerun()
+            else:
+                # Si ya existen, renderizar
+                self.render_s73_system_detailed(s73_results, config)
+
         # ===== PESTAÑA 3: PORTAFOLIO ELITE =====
         with tabs[2]:
             if s73_results:
+                # La lógica de renderizado Elite ya maneja si elite_results es None
                 elite_results = self.render_elite_portfolio(
                     s73_results, probabilities, odds_matrix, normalized_entropies, config
                 )
-        
+            else:
+                st.warning("⚠️ Primero debes generar el Sistema S73 en la pestaña anterior.")
+
         # ===== PESTAÑA 4: BACKTESTING =====
         with tabs[3]:
             if s73_results:
                 backtest_results = self.render_backtesting(
                     s73_results, elite_results, probabilities, odds_matrix, normalized_entropies, config
                 )
-        
+            else:
+                st.warning("⚠️ Genera el Sistema S73 para habilitar el backtesting.")
+
         # ===== PESTAÑA 5: EXPORTAR =====
         with tabs[4]:
             self.render_export_section(s73_results, elite_results, backtest_results, config)
@@ -7227,5 +7240,7 @@ def main():
     # Crear y ejecutar aplicación
     app = ACBEProfessionalApp()
     app.run()
+
+
 if __name__ == "__main__":
     main()
