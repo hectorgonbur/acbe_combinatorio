@@ -1464,6 +1464,9 @@ class MatchInputLayer:
                 probabilities, normalized_entropies, odds_matrix
             )
             
+             # Mostrar resultados ACBE primero
+            st.dataframe(matches_df[['home_team', 'away_team', 'prob_acbe_1', 'prob_acbe_X', 'prob_acbe_2', 'entropy', 'classification']])
+    
             # ==================== SECCIÓN S73 ====================
             # 🎯 PREPARACIÓN PARA SISTEMA S73
             st.subheader("🧮 Preparación para Sistema S73")
