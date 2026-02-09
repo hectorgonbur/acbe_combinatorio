@@ -2114,15 +2114,16 @@ class S73System:
         selected_indices = []
         covered_indices = set()
         
-        # Priorizar combinaciones con alta probabilidad
-        priority_queue = sorted_indices.copy()
+        # --- CORRECCIÓN CRÍTICA AQUÍ: .tolist() ---
+        # Convertimos a lista normal de Python para evitar el error "Truth value of an array"
+        priority_queue = sorted_indices.tolist()
         
         iteration = 0
-        max_iterations = SystemConfig.TARGET_COMBINATIONS * 2
+        max_iterations = SystemConfig.TARGET_COMBINATIONS * 3
         
         while (len(selected_indices) < SystemConfig.TARGET_COMBINATIONS and 
                iteration < max_iterations and 
-               priority_queue):
+               len(priority_queue) > 0): # Usamos len() para ser seguros
             
             iteration += 1
             
@@ -2481,6 +2482,10 @@ class S73System:
             Matriz de distancias (n, n)
         """
         n = len(combinations)
+       
+        if n > 5000: 
+            combinations = combinations[:5000]
+            n = 5000
         
         # Versión optimizada usando broadcasting
         distances = np.zeros((n, n), dtype=np.int8)
