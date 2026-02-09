@@ -1464,6 +1464,24 @@ class MatchInputLayer:
                 probabilities, normalized_entropies, odds_matrix
             )
             
+            # Actualizar matches_df con cálculos
+            matches_df['lambda_home'] = lambda_home
+            matches_df['lambda_away'] = lambda_away
+            matches_df['entropy'] = entropies
+            matches_df['norm_entropy'] = normalized_entropies
+            matches_df['classification'] = classifications
+            matches_df['signos_permitidos'] = [''.join([SystemConfig.OUTCOME_LABELS[s] for s in signs]) 
+                                            for signs in allowed_signs]
+            
+            # Calcular valor esperado
+            expected_value = probabilities * odds_matrix - 1
+            for i, outcome in enumerate(['1', 'X', '2']):
+                matches_df[f'ev_{outcome}'] = expected_value[:, i]
+            
+            # Añadir probabilidades ACBE al DataFrame
+            for i, outcome in enumerate(['1', 'X', '2']):
+                matches_df[f'prob_acbe_{outcome}'] = probabilities[:, i]
+            
              # Mostrar resultados ACBE primero
             st.dataframe(matches_df[['home_team', 'away_team', 'prob_acbe_1', 'prob_acbe_X', 'prob_acbe_2', 'entropy', 'classification']])
     
@@ -1498,25 +1516,7 @@ class MatchInputLayer:
                 st.success(f"✅ **SISTEMA VIABLE:** {strong_matches} partidos fuertes, {chaotic_matches} caóticos")
             else:
                 st.error(f"❌ **SISTEMA NO VIABLE:** Demasiados partidos caóticos ({chaotic_matches}/6)")
-            # ==================== FIN SECCIÓN S73 ====================
-            
-            # Actualizar matches_df con cálculos
-            matches_df['lambda_home'] = lambda_home
-            matches_df['lambda_away'] = lambda_away
-            matches_df['entropy'] = entropies
-            matches_df['norm_entropy'] = normalized_entropies
-            matches_df['classification'] = classifications
-            matches_df['signos_permitidos'] = [''.join([SystemConfig.OUTCOME_LABELS[s] for s in signs]) 
-                                            for signs in allowed_signs]
-            
-            # Calcular valor esperado
-            expected_value = probabilities * odds_matrix - 1
-            for i, outcome in enumerate(['1', 'X', '2']):
-                matches_df[f'ev_{outcome}'] = expected_value[:, i]
-            
-            # Añadir probabilidades ACBE al DataFrame
-            for i, outcome in enumerate(['1', 'X', '2']):
-                matches_df[f'prob_acbe_{outcome}'] = probabilities[:, i]
+            # ==================== FIN SECCIÓN S73 ====================            
         
         # Mostrar resumen CON ANÁLISIS
         MatchInputLayer._render_complete_summary(matches_df, params_dict, probabilities, normalized_entropies, classifications)
