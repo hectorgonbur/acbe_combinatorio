@@ -1969,7 +1969,6 @@ class S73System:
             joint_probs: Array (n_combinations,) de probabilidades conjuntas
             allowed_signs: Lista de signos permitidos por partido
         """
-        from information_theory import InformationTheory
         
         # Validación de inputs
         if probabilities.shape[0] < SystemConfig.NUM_MATCHES:
@@ -6373,10 +6372,9 @@ class ACBEProfessionalApp:
         
             except Exception as e:
                 st.error(f"❌ Error crítico generando sistema S73: {e}")
-                # Devolver estructura mínima pero válida
-                return self._create_minimal_s73_results(config['bankroll'])
-            
-           
+                import traceback
+                st.text(traceback.format_exc())
+                return None # Simplemente devolvemos None en caso de error          
     
     @staticmethod
     def create_columns_dataframe(combinations: np.ndarray,
