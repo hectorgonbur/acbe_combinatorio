@@ -11,7 +11,9 @@ from datetime import datetime
 import io
 import time
 import warnings
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional, Tuple, Union  # ← AÑADIR
+import itertools  # ← FALTA
+from collections import defaultdict  # ← FALTA
 warnings.filterwarnings('ignore')
 
 # ============================================================================
@@ -573,28 +575,28 @@ class SessionStateManager:
             SessionStateManager._log_activity("calculate_master_bet_error", 
                                              error=str(e))
 
-# ============================================================================
-# INICIALIZACIÓN GLOBAL DEL ESTADO
-# ============================================================================
+    # ============================================================================
+    # INICIALIZACIÓN GLOBAL DEL ESTADO
+    # ============================================================================
 
-def initialize_global_state():
-    """
-    Función de inicialización global del estado.
-    Debe llamarse al inicio de cada ejecución de Streamlit.
-    """
-    # Inicializar estado de sesión
-    SessionStateManager.initialize_session_state()
-    
-    # Validar estado actual
-    problems = SessionStateManager.validate_state()
-    
-    # Si hay problemas, intentar reparar automáticamente
-    if problems:
-        print(f"⚠️ Problemas en estado de sesión: {problems}")
-        # Para v3.0, podemos intentar reparaciones automáticas simples
-        # Por ahora, solo logueamos los problemas
-    
-    return True
+    def initialize_global_state():
+        """
+        Función de inicialización global del estado.
+        Debe llamarse al inicio de cada ejecución de Streamlit.
+        """
+        # Inicializar estado de sesión
+        SessionStateManager.initialize_session_state()
+        
+        # Validar estado actual
+        problems = SessionStateManager.validate_state()
+        
+        # Si hay problemas, intentar reparar automáticamente
+        if problems:
+            print(f"⚠️ Problemas en estado de sesión: {problems}")
+            # Para v3.0, podemos intentar reparaciones automáticas simples
+            # Por ahora, solo logueamos los problemas
+        
+        return True
 # ============================================================================
 # SECCIÓN 1: CONFIGURACIÓN DEL SISTEMA - PROFESIONAL v3.0
 # ============================================================================
@@ -1133,38 +1135,346 @@ class SystemConfig:
             'kelly_multipliers': SystemConfig.KELLY_MULTIPLIERS
         }
 
+    # ============================================================================
+    # VALIDACIÓN AUTOMÁTICA AL IMPORTAR
+    # ============================================================================
 
-# ============================================================================
-# VALIDACIÓN AUTOMÁTICA AL IMPORTAR
-# ============================================================================
+    def validate_system_config():
+        """
+        Valida la configuración del sistema al importar el módulo.
+        
+        Raises:
+            ValueError: Si hay inconsistencias en la configuración
+        """
+        problems = SystemConfig.validate_configuration()
+        
+        if problems:
+            error_message = "Errores en configuración del sistema:\n" + "\n".join(f"  - {problem}" for problem in problems)
+            raise ValueError(error_message)
+        
+        return True
 
-def validate_system_config():
-    """
-    Valida la configuración del sistema al importar el módulo.
+
+    # Validar al importar
+    try:
+        validate_system_config()
+        print("✅ Configuración del sistema validada exitosamente")
+    except ValueError as e:
+        print(f"❌ Error en configuración del sistema: {e}")
+        # No raise para permitir ejecución, pero mostrar advertencia
+        
+class ACBEModel:
+    """Modelo Bayesiano Gamma-Poisson optimizado."""
     
-    Raises:
-        ValueError: Si hay inconsistencias en la configuración
-    """
-    problems = SystemConfig.validate_configuration()
+    @staticmethod
+    @st.cache_data(ttl=3600)
+    def simulate_probabilities(
+        lambda_home: np.ndarray,
+        lambda_away: np.ndarray,
+        n_sims: int = SystemConfig.MONTE_CARLO_ITERATIONS
+    ) -> np.ndarray:
+        """Simulación vectorizada de probabilidades."""
+        import numpy as np
+        n_matches = len(lambda_home)
+        
+        # Generar goles
+        home_goals = np.random.poisson(
+            lam=np.tile(lambda_home, (n_sims, 1)),
+            size=(n_sims, n_matches)
+        )
+        away_goals = np.random.poisson(
+            lam=np.tile(lambda_away, (n_sims, 1)),
+            size=(n_sims, n_matches)
+        )
+        
+        # Calcular resultados
+        home_wins = (home_goals > away_goals).sum(axis=0) / n_sims
+        draws = (home_goals == away_goals).sum(axis=0) / n_sims
+        away_wins = (home_goals < away_goals).sum(axis=0) / n_sims
+        
+        # Crear matriz de probabilidades
+        probs = np.column_stack([home_wins, draws, away_wins])
+        
+        # Normalizar
+        probs = np.clip(probs, SystemConfig.MIN_PROBABILITY, 1.0)
+        probs = probs / probs.sum(axis=1, keepdims=True)
+        
+        return probs
     
-    if problems:
-        error_message = "Errores en configuración del sistema:\n" + "\n".join(f"  - {problem}" for problem in problems)
-        raise ValueError(error_message)
+    @staticmethod
+    def calculate_entropy(probabilities: np.ndarray) -> np.ndarray:
+        """Calcula entropía normalizada."""
+        import numpy as np
+        probs = np.clip(probabilities, SystemConfig.MIN_PROBABILITY, 1.0)
+        return -np.sum(probs * np.log(probs) / np.log(SystemConfig.BASE_ENTROPY), axis=1)
+
+
+class InformationTheory:
+    """Clasificación de partidos por teoría de información."""
     
-    return True
+    @staticmethod
+    def classify_matches(
+        probabilities: np.ndarray,
+        normalized_entropies: np.ndarray,
+        odds_matrix: Optional[np.ndarray] = None
+    ) -> Tuple[List[List[int]], List[str]]:
+        """Clasifica partidos según entropía y valor esperado."""
+        allowed_signs = []
+        classifications = []
+        
+        for i in range(len(probabilities)):
+            entropy = normalized_entropies[i]
+            probs = probabilities[i]
+            
+            # Calcular valor esperado si hay cuotas
+            if odds_matrix is not None:
+                evs = probs * odds_matrix[i] - 1
+            else:
+                evs = np.zeros(3)
+            
+            # Clasificación basada en entropía
+            if entropy <= SystemConfig.STRONG_MATCH_THRESHOLD:
+                best_idx = np.argmax(probs)
+                if (probs[best_idx] >= SystemConfig.MIN_OPTION_PROBABILITY and
+                    evs[best_idx] > SystemConfig.MIN_EV_THRESHOLD):
+                    allowed_signs.append([best_idx])
+                    classifications.append('Fuerte')
+                else:
+                    allowed_signs.append([0, 1, 2])
+                    classifications.append('Caótico')
+            
+            elif entropy <= SystemConfig.MEDIUM_MATCH_THRESHOLD:
+                top_two = np.argsort(probs)[-2:].tolist()
+                sorted_probs = np.sort(probs)[::-1]
+                
+                if len(sorted_probs) >= 2 and (sorted_probs[0] - sorted_probs[1]) >= SystemConfig.MIN_PROBABILITY_GAP:
+                    allowed_signs.append([np.argmax(probs)])
+                    classifications.append('Fuerte (gap)')
+                else:
+                    allowed_signs.append(top_two)
+                    classifications.append('Medio')
+            
+            else:
+                allowed_signs.append([0, 1, 2])
+                classifications.append('Caótico')
+        
+        return allowed_signs, classifications
+    
+class MatchInputLayer:
+    """Capa de input profesional con validaciones avanzadas - OPTIMIZADA."""
+    
+    @staticmethod
+    def validate_odds(odds_array: np.ndarray) -> np.ndarray:
+        """Valida y normaliza cuotas ingresadas."""
+        if np.any(np.isnan(odds_array)):
+            st.warning("⚠️ Valores inválidos detectados. Usando defaults...")
+            return np.full_like(odds_array, 2.0)
+        
+        # Aplicar límites
+        odds_array = np.maximum(odds_array, SystemConfig.MIN_ODDS + 0.01)
+        odds_array = np.minimum(odds_array, SystemConfig.MAX_ODDS)
+        
+        return odds_array
+    
+    @staticmethod
+    def render_input_section() -> Tuple[pd.DataFrame, Dict, str]:
+        """Renderiza sección de input de partidos."""
+        st.header("⚽ Input de Partidos")
+        
+        # Selector de modo simplificado
+        mode = st.radio(
+            "Modo de operación:",
+            ["🔘 Automático", "🎮 Manual"],
+            index=0,
+            horizontal=True
+        )
+        
+        is_manual = mode == "🎮 Manual"
+        
+        # Mensaje de estado
+        status_color = "🟢" if is_manual else "🔵"
+        st.caption(f"{status_color} Modo: {'Manual' if is_manual else 'Automático'}")
+        
+        matches_data = []
+        strengths_data = []
+        
+        # Input para 6 partidos
+        st.subheader(f"📝 Ingreso de {SystemConfig.NUM_MATCHES} Partidos")
+        
+        for idx in range(SystemConfig.NUM_MATCHES):
+            match_num = idx + 1
+            st.markdown(f"##### Partido {match_num}")
+            
+            col1, col2 = st.columns([2, 3])
+            
+            with col1:
+                league = st.text_input(
+                    f"Liga {match_num}",
+                    value=f"Liga {match_num}",
+                    key=f"league_{match_num}"
+                )
+                home_team = st.text_input(
+                    f"Local {match_num}",
+                    value=f"Equipo {match_num}A",
+                    key=f"home_{match_num}"
+                )
+                away_team = st.text_input(
+                    f"Visitante {match_num}",
+                    value=f"Equipo {match_num}B",
+                    key=f"away_{match_num}"
+                )
+            
+            with col2:
+                # Cuotas
+                odds_1 = st.number_input(
+                    f"1 ({home_team})",
+                    min_value=1.01,
+                    max_value=50.0,
+                    value=1.8 + idx * 0.1,
+                    step=0.1,
+                    key=f"odds1_{match_num}"
+                )
+                odds_x = st.number_input(
+                    "X (Empate)",
+                    min_value=1.01,
+                    max_value=50.0,
+                    value=3.2 + idx * 0.1,
+                    step=0.1,
+                    key=f"oddsx_{match_num}"
+                )
+                odds_2 = st.number_input(
+                    f"2 ({away_team})",
+                    min_value=1.01,
+                    max_value=50.0,
+                    value=4.0 + idx * 0.1,
+                    step=0.1,
+                    key=f"odds2_{match_num}"
+                )
+                
+                # Fuerzas solo en modo manual
+                if is_manual:
+                    with st.expander("⚙️ Fuerzas (Opcional)", expanded=False):
+                        home_attack = st.slider(
+                            f"Ataque {home_team}",
+                            0.5, 2.0, 1.0, 0.05,
+                            key=f"ha_{match_num}"
+                        )
+                        away_attack = st.slider(
+                            f"Ataque {away_team}",
+                            0.5, 2.0, 1.0, 0.05,
+                            key=f"aa_{match_num}"
+                        )
+                else:
+                    home_attack = away_attack = 1.0
+            
+            # Valores por defecto para defensas y ventaja
+            home_defense = away_defense = 1.0
+            home_advantage = SystemConfig.DEFAULT_HOME_ADVANTAGE
+            
+            # Calcular métricas
+            implied_prob = (1/odds_1 + 1/odds_x + 1/odds_2)
+            margin = (implied_prob - 1) * 100
+            
+            matches_data.append({
+                'match_id': match_num,
+                'league': league,
+                'home_team': home_team,
+                'away_team': away_team,
+                'home_attack': home_attack,
+                'away_attack': away_attack,
+                'home_defense': home_defense,
+                'away_defense': away_defense,
+                'home_advantage': home_advantage,
+                'odds_1': odds_1,
+                'odds_X': odds_x,
+                'odds_2': odds_2,
+                'implied_prob': implied_prob,
+                'margin': margin,
+                'mode': 'Manual' if is_manual else 'Auto'
+            })
+            
+            strengths_data.append({
+                'attack': [home_attack, away_attack],
+                'defense': [home_defense, away_defense],
+                'advantage': home_advantage
+            })
+            
+            st.markdown("---")
+        
+        # Crear DataFrame
+        matches_df = pd.DataFrame(matches_data)
+        
+        # Extraer matriz de cuotas
+        odds_matrix = matches_df[['odds_1', 'odds_X', 'odds_2']].values
+        odds_matrix = MatchInputLayer.validate_odds(odds_matrix)
+        
+        # Preparar diccionario de parámetros
+        params_dict = {
+            'attack_strengths': np.array([s['attack'] for s in strengths_data]),
+            'defense_strengths': np.array([s['defense'] for s in strengths_data]),
+            'home_advantages': np.array([s['advantage'] for s in strengths_data]),
+            'matches_df': matches_df,
+            'odds_matrix': odds_matrix,
+            'mode': 'manual' if is_manual else 'auto'
+        }
+        
+        # Mostrar resumen
+        MatchInputLayer._render_summary(matches_df, params_dict)
+        
+        return matches_df, params_dict, params_dict['mode']
+    
+    @staticmethod
+    def _render_summary(matches_df: pd.DataFrame, params_dict: Dict):
+        """Renderiza resumen del input."""
+        st.subheader("📊 Resumen del Input")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            avg_margin = matches_df['margin'].mean()
+            st.metric("Margen Promedio", f"{avg_margin:.2f}%")
+        
+        with col2:
+            avg_odds = matches_df[['odds_1', 'odds_X', 'odds_2']].values.mean()
+            st.metric("Cuota Promedio", f"{avg_odds:.2f}")
+        
+        with col3:
+            total_combo = 3 ** len(matches_df)
+            st.metric("Combinaciones", f"{total_combo:,}")
+        
+        # Información de modo
+        mode = params_dict['mode']
+        st.caption(f"Modo actual: **{'🎮 Manual' if mode == 'manual' else '🔘 Automático'}**")
+    
+    @staticmethod
+    def process_input(params_dict: Dict) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray]:
+        """Procesa input para generar probabilidades."""
+        attack = params_dict['attack_strengths']
+        defense = params_dict['defense_strengths']
+        advantages = params_dict['home_advantages']
+        
+        n_matches = len(attack)
+        lambda_home = np.zeros(n_matches)
+        lambda_away = np.zeros(n_matches)
+        
+        # Calcular tasas de goles
+        for i in range(n_matches):
+            lambda_home[i] = attack[i, 0] * defense[i, 1] * advantages[i]
+            lambda_away[i] = attack[i, 1] * defense[i, 0]
+        
+        # Generar probabilidades
+        probabilities = ACBEModel.simulate_probabilities(lambda_home, lambda_away)
+        
+        # Actualizar DataFrame
+        matches_df = params_dict['matches_df'].copy()
+        matches_df['lambda_home'] = lambda_home
+        matches_df['lambda_away'] = lambda_away
+        
+        return matches_df, params_dict['odds_matrix'], probabilities
 
-
-# Validar al importar
-try:
-    validate_system_config()
-    print("✅ Configuración del sistema validada exitosamente")
-except ValueError as e:
-    print(f"❌ Error en configuración del sistema: {e}")
-    # No raise para permitir ejecución, pero mostrar advertencia
-
-# ============================================================================
-# SECCIÓN 2: SISTEMA COMBINATORIO S73 PROFESIONAL CON REDUCCIÓN ELITE v3.0
-# ============================================================================
+    # ============================================================================
+    # SECCIÓN 2: SISTEMA COMBINATORIO S73 PROFESIONAL CON REDUCCIÓN ELITE v3.0
+    # ============================================================================
 
 class S73System:
     """
@@ -3258,556 +3568,6 @@ class ACBEApp:
 # ============================================================================
 # SECCIÓN 5: CLASES AUXILIARES OPTIMIZADAS (v3.0)
 # ============================================================================
-
-class MatchInputLayer:
-    """Capa de input profesional con validaciones avanzadas - OPTIMIZADA."""
-    
-    @staticmethod
-    def validate_odds(odds_array: np.ndarray) -> np.ndarray:
-        """Valida y normaliza cuotas ingresadas."""
-        if np.any(np.isnan(odds_array)):
-            st.warning("⚠️ Valores inválidos detectados. Usando defaults...")
-            return np.full_like(odds_array, 2.0)
-        
-        # Aplicar límites
-        odds_array = np.maximum(odds_array, SystemConfig.MIN_ODDS + 0.01)
-        odds_array = np.minimum(odds_array, SystemConfig.MAX_ODDS)
-        
-        return odds_array
-    
-    @staticmethod
-    def render_input_section() -> Tuple[pd.DataFrame, Dict, str]:
-        """Renderiza sección de input de partidos."""
-        st.header("⚽ Input de Partidos")
-        
-        # Selector de modo simplificado
-        mode = st.radio(
-            "Modo de operación:",
-            ["🔘 Automático", "🎮 Manual"],
-            index=0,
-            horizontal=True
-        )
-        
-        is_manual = mode == "🎮 Manual"
-        
-        # Mensaje de estado
-        status_color = "🟢" if is_manual else "🔵"
-        st.caption(f"{status_color} Modo: {'Manual' if is_manual else 'Automático'}")
-        
-        matches_data = []
-        strengths_data = []
-        
-        # Input para 6 partidos
-        st.subheader(f"📝 Ingreso de {SystemConfig.NUM_MATCHES} Partidos")
-        
-        for idx in range(SystemConfig.NUM_MATCHES):
-            match_num = idx + 1
-            st.markdown(f"##### Partido {match_num}")
-            
-            col1, col2 = st.columns([2, 3])
-            
-            with col1:
-                league = st.text_input(
-                    f"Liga {match_num}",
-                    value=f"Liga {match_num}",
-                    key=f"league_{match_num}"
-                )
-                home_team = st.text_input(
-                    f"Local {match_num}",
-                    value=f"Equipo {match_num}A",
-                    key=f"home_{match_num}"
-                )
-                away_team = st.text_input(
-                    f"Visitante {match_num}",
-                    value=f"Equipo {match_num}B",
-                    key=f"away_{match_num}"
-                )
-            
-            with col2:
-                # Cuotas
-                odds_1 = st.number_input(
-                    f"1 ({home_team})",
-                    min_value=1.01,
-                    max_value=50.0,
-                    value=1.8 + idx * 0.1,
-                    step=0.1,
-                    key=f"odds1_{match_num}"
-                )
-                odds_x = st.number_input(
-                    "X (Empate)",
-                    min_value=1.01,
-                    max_value=50.0,
-                    value=3.2 + idx * 0.1,
-                    step=0.1,
-                    key=f"oddsx_{match_num}"
-                )
-                odds_2 = st.number_input(
-                    f"2 ({away_team})",
-                    min_value=1.01,
-                    max_value=50.0,
-                    value=4.0 + idx * 0.1,
-                    step=0.1,
-                    key=f"odds2_{match_num}"
-                )
-                
-                # Fuerzas solo en modo manual
-                if is_manual:
-                    with st.expander("⚙️ Fuerzas (Opcional)", expanded=False):
-                        home_attack = st.slider(
-                            f"Ataque {home_team}",
-                            0.5, 2.0, 1.0, 0.05,
-                            key=f"ha_{match_num}"
-                        )
-                        away_attack = st.slider(
-                            f"Ataque {away_team}",
-                            0.5, 2.0, 1.0, 0.05,
-                            key=f"aa_{match_num}"
-                        )
-                else:
-                    home_attack = away_attack = 1.0
-            
-            # Valores por defecto para defensas y ventaja
-            home_defense = away_defense = 1.0
-            home_advantage = SystemConfig.DEFAULT_HOME_ADVANTAGE
-            
-            # Calcular métricas
-            implied_prob = (1/odds_1 + 1/odds_x + 1/odds_2)
-            margin = (implied_prob - 1) * 100
-            
-            matches_data.append({
-                'match_id': match_num,
-                'league': league,
-                'home_team': home_team,
-                'away_team': away_team,
-                'home_attack': home_attack,
-                'away_attack': away_attack,
-                'home_defense': home_defense,
-                'away_defense': away_defense,
-                'home_advantage': home_advantage,
-                'odds_1': odds_1,
-                'odds_X': odds_x,
-                'odds_2': odds_2,
-                'implied_prob': implied_prob,
-                'margin': margin,
-                'mode': 'Manual' if is_manual else 'Auto'
-            })
-            
-            strengths_data.append({
-                'attack': [home_attack, away_attack],
-                'defense': [home_defense, away_defense],
-                'advantage': home_advantage
-            })
-            
-            st.markdown("---")
-        
-        # Crear DataFrame
-        matches_df = pd.DataFrame(matches_data)
-        
-        # Extraer matriz de cuotas
-        odds_matrix = matches_df[['odds_1', 'odds_X', 'odds_2']].values
-        odds_matrix = MatchInputLayer.validate_odds(odds_matrix)
-        
-        # Preparar diccionario de parámetros
-        params_dict = {
-            'attack_strengths': np.array([s['attack'] for s in strengths_data]),
-            'defense_strengths': np.array([s['defense'] for s in strengths_data]),
-            'home_advantages': np.array([s['advantage'] for s in strengths_data]),
-            'matches_df': matches_df,
-            'odds_matrix': odds_matrix,
-            'mode': 'manual' if is_manual else 'auto'
-        }
-        
-        # Mostrar resumen
-        MatchInputLayer._render_summary(matches_df, params_dict)
-        
-        return matches_df, params_dict, params_dict['mode']
-    
-    @staticmethod
-    def _render_summary(matches_df: pd.DataFrame, params_dict: Dict):
-        """Renderiza resumen del input."""
-        st.subheader("📊 Resumen del Input")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            avg_margin = matches_df['margin'].mean()
-            st.metric("Margen Promedio", f"{avg_margin:.2f}%")
-        
-        with col2:
-            avg_odds = matches_df[['odds_1', 'odds_X', 'odds_2']].values.mean()
-            st.metric("Cuota Promedio", f"{avg_odds:.2f}")
-        
-        with col3:
-            total_combo = 3 ** len(matches_df)
-            st.metric("Combinaciones", f"{total_combo:,}")
-        
-        # Información de modo
-        mode = params_dict['mode']
-        st.caption(f"Modo actual: **{'🎮 Manual' if mode == 'manual' else '🔘 Automático'}**")
-    
-    @staticmethod
-    def process_input(params_dict: Dict) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray]:
-        """Procesa input para generar probabilidades."""
-        attack = params_dict['attack_strengths']
-        defense = params_dict['defense_strengths']
-        advantages = params_dict['home_advantages']
-        
-        n_matches = len(attack)
-        lambda_home = np.zeros(n_matches)
-        lambda_away = np.zeros(n_matches)
-        
-        # Calcular tasas de goles
-        for i in range(n_matches):
-            lambda_home[i] = attack[i, 0] * defense[i, 1] * advantages[i]
-            lambda_away[i] = attack[i, 1] * defense[i, 0]
-        
-        # Generar probabilidades
-        probabilities = ACBEModel.simulate_probabilities(lambda_home, lambda_away)
-        
-        # Actualizar DataFrame
-        matches_df = params_dict['matches_df'].copy()
-        matches_df['lambda_home'] = lambda_home
-        matches_df['lambda_away'] = lambda_away
-        
-        return matches_df, params_dict['odds_matrix'], probabilities
-
-
-class ACBEModel:
-    """Modelo Bayesiano Gamma-Poisson optimizado."""
-    
-    @staticmethod
-    @st.cache_data(ttl=3600)
-    def simulate_probabilities(
-        lambda_home: np.ndarray,
-        lambda_away: np.ndarray,
-        n_sims: int = SystemConfig.MONTE_CARLO_ITERATIONS
-    ) -> np.ndarray:
-        """Simulación vectorizada de probabilidades."""
-        n_matches = len(lambda_home)
-        
-        # Generar goles
-        home_goals = np.random.poisson(
-            lam=np.tile(lambda_home, (n_sims, 1)),
-            size=(n_sims, n_matches)
-        )
-        away_goals = np.random.poisson(
-            lam=np.tile(lambda_away, (n_sims, 1)),
-            size=(n_sims, n_matches)
-        )
-        
-        # Calcular resultados
-        home_wins = (home_goals > away_goals).sum(axis=0) / n_sims
-        draws = (home_goals == away_goals).sum(axis=0) / n_sims
-        away_wins = (home_goals < away_goals).sum(axis=0) / n_sims
-        
-        # Crear matriz de probabilidades
-        probs = np.column_stack([home_wins, draws, away_wins])
-        
-        # Normalizar
-        probs = np.clip(probs, SystemConfig.MIN_PROBABILITY, 1.0)
-        probs = probs / probs.sum(axis=1, keepdims=True)
-        
-        return probs
-    
-    @staticmethod
-    def calculate_entropy(probabilities: np.ndarray) -> np.ndarray:
-        """Calcula entropía normalizada."""
-        probs = np.clip(probabilities, SystemConfig.MIN_PROBABILITY, 1.0)
-        return -np.sum(probs * np.log(probs) / np.log(SystemConfig.BASE_ENTROPY), axis=1)
-
-
-class InformationTheory:
-    """Clasificación de partidos por teoría de información."""
-    
-    @staticmethod
-    def classify_matches(
-        probabilities: np.ndarray,
-        normalized_entropies: np.ndarray,
-        odds_matrix: Optional[np.ndarray] = None
-    ) -> Tuple[List[List[int]], List[str]]:
-        """Clasifica partidos según entropía y valor esperado."""
-        allowed_signs = []
-        classifications = []
-        
-        for i in range(len(probabilities)):
-            entropy = normalized_entropies[i]
-            probs = probabilities[i]
-            
-            # Calcular valor esperado si hay cuotas
-            if odds_matrix is not None:
-                evs = probs * odds_matrix[i] - 1
-            else:
-                evs = np.zeros(3)
-            
-            # Clasificación basada en entropía
-            if entropy <= SystemConfig.STRONG_MATCH_THRESHOLD:
-                best_idx = np.argmax(probs)
-                if (probs[best_idx] >= SystemConfig.MIN_OPTION_PROBABILITY and
-                    evs[best_idx] > SystemConfig.MIN_EV_THRESHOLD):
-                    allowed_signs.append([best_idx])
-                    classifications.append('Fuerte')
-                else:
-                    allowed_signs.append([0, 1, 2])
-                    classifications.append('Caótico')
-            
-            elif entropy <= SystemConfig.MEDIUM_MATCH_THRESHOLD:
-                top_two = np.argsort(probs)[-2:].tolist()
-                sorted_probs = np.sort(probs)[::-1]
-                
-                if len(sorted_probs) >= 2 and (sorted_probs[0] - sorted_probs[1]) >= SystemConfig.MIN_PROBABILITY_GAP:
-                    allowed_signs.append([np.argmax(probs)])
-                    classifications.append('Fuerte (gap)')
-                else:
-                    allowed_signs.append(top_two)
-                    classifications.append('Medio')
-            
-            else:
-                allowed_signs.append([0, 1, 2])
-                classifications.append('Caótico')
-        
-        return allowed_signs, classifications
-
-
-class PortfolioEngine:
-    """Motor de análisis de portafolio optimizado."""
-    
-    def __init__(self, initial_bankroll: float = SystemConfig.DEFAULT_BANKROLL):
-        self.initial_bankroll = initial_bankroll
-        self.current_bankroll = initial_bankroll
-        self.history = []
-        
-    def analyze_portfolio(
-        self,
-        combinations: List,
-        probabilities: List,
-        odds_matrix: np.ndarray,
-        stakes: np.ndarray,
-        bankroll: float
-    ) -> Dict:
-        """Analiza métricas del portafolio."""
-        n_columns = len(combinations)
-        
-        # Calcular métricas por columna
-        column_metrics = []
-        for idx, (combo, prob, stake) in enumerate(zip(combinations, probabilities, stakes)):
-            odds = S73System.calculate_combination_odds(combo, odds_matrix)
-            ev = prob * odds - 1
-            investment = stake * bankroll
-            
-            column_metrics.append({
-                'id': idx + 1,
-                'combination': ''.join([SystemConfig.OUTCOME_LABELS[s] for s in combo]),
-                'probability': prob,
-                'odds': odds,
-                'expected_value': ev,
-                'stake_pct': stake * 100,
-                'investment': investment,
-                'potential_return': investment * odds
-            })
-        
-        # Métricas agregadas
-        total_investment = sum(metric['investment'] for metric in column_metrics)
-        total_exposure = (total_investment / bankroll) * 100
-        avg_ev = np.mean([m['expected_value'] for m in column_metrics])
-        
-        return {
-            'column_metrics': pd.DataFrame(column_metrics),
-            'total_investment': total_investment,
-            'total_exposure': total_exposure,
-            'avg_expected_value': avg_ev,
-            'n_columns': n_columns
-        }
-    
-    def update_bankroll(self, result: float):
-        """Actualiza bankroll después de una ronda."""
-        self.current_bankroll += result
-        self.history.append({
-            'bankroll': self.current_bankroll,
-            'change': result,
-            'timestamp': datetime.now()
-        })
-
-
-class VectorizedBacktester:
-    """Backtester vectorizado para simulación masiva."""
-    
-    def __init__(self, initial_bankroll: float = SystemConfig.DEFAULT_BANKROLL):
-        self.initial_bankroll = initial_bankroll
-        self.results_history = []
-        
-    def run_simulation(
-        self,
-        combinations: List,
-        probabilities: List,
-        odds_matrix: np.ndarray,
-        stakes: np.ndarray,
-        n_rounds: int = 100,
-        n_sims: int = 1000
-    ) -> Dict:
-        """Ejecuta simulación Monte Carlo."""
-        n_columns = len(combinations)
-        
-        # Preparar datos para simulación
-        combination_probs = np.array(probabilities)
-        combination_odds = np.array([
-            S73System.calculate_combination_odds(combo, odds_matrix)
-            for combo in combinations
-        ])
-        
-        # Resultados de simulación
-        final_bankrolls = []
-        max_drawdowns = []
-        sharpe_ratios = []
-        
-        for _ in range(n_sims):
-            bankroll = self.initial_bankroll
-            equity_curve = [bankroll]
-            
-            for _ in range(n_rounds):
-                # Simular resultado de cada columna
-                column_results = np.random.binomial(1, combination_probs)
-                round_pnl = np.sum(column_results * stakes * bankroll * (combination_odds - 1))
-                
-                # Actualizar bankroll
-                bankroll += round_pnl
-                equity_curve.append(bankroll)
-            
-            # Calcular métricas
-            final_bankrolls.append(bankroll)
-            max_drawdowns.append(self._calculate_max_drawdown(equity_curve))
-            sharpe_ratios.append(self._calculate_sharpe_ratio(equity_curve))
-        
-        return {
-            'final_bankrolls': np.array(final_bankrolls),
-            'max_drawdowns': np.array(max_drawdowns),
-            'sharpe_ratios': np.array(sharpe_ratios),
-            'avg_final_bankroll': np.mean(final_bankrolls),
-            'win_rate': np.mean([b > self.initial_bankroll for b in final_bankrolls]),
-            'median_bankroll': np.median(final_bankrolls),
-            'std_bankroll': np.std(final_bankrolls)
-        }
-    
-    def _calculate_max_drawdown(self, equity_curve: List[float]) -> float:
-        """Calcula máximo drawdown."""
-        curve = np.array(equity_curve)
-        peak = np.maximum.accumulate(curve)
-        drawdown = (peak - curve) / peak
-        return np.max(drawdown) * 100  # Porcentaje
-    
-    def _calculate_sharpe_ratio(self, equity_curve: List[float], risk_free_rate: float = 0.02) -> float:
-        """Calcula ratio Sharpe anualizado."""
-        returns = np.diff(equity_curve) / equity_curve[:-1]
-        
-        if len(returns) < 2:
-            return 0.0
-        
-        excess_returns = returns - risk_free_rate / 252  # Diario
-        if np.std(excess_returns) == 0:
-            return 0.0
-        
-        return np.sqrt(252) * np.mean(excess_returns) / np.std(excess_returns)
-
-
-class DataExporter:
-    """Sistema de exportación de datos optimizado."""
-    
-    @staticmethod
-    def export_to_csv(data: pd.DataFrame, filename: str = "s73_columns.csv") -> Dict:
-        """Exporta DataFrame a CSV."""
-        csv_data = data.to_csv(index=False)
-        
-        return {
-            'data': csv_data,
-            'filename': filename,
-            'mime': 'text/csv'
-        }
-    
-    @staticmethod
-    def export_to_excel(data: pd.DataFrame, filename: str = "s73_results.xlsx") -> Dict:
-        """Exporta DataFrame a Excel."""
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            data.to_excel(writer, index=False, sheet_name='Columnas')
-        
-        return {
-            'data': output.getvalue(),
-            'filename': filename,
-            'mime': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        }
-    
-    @staticmethod
-    def export_portfolio_report(
-        columns_df: pd.DataFrame,
-        system_metrics: Dict,
-        backtest_results: Dict
-    ) -> Dict:
-        """Genera reporte completo del portafolio."""
-        # Crear múltiples hojas
-        output = io.BytesIO()
-        
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Hoja 1: Columnas
-            columns_df.to_excel(writer, sheet_name='Columnas', index=False)
-            
-            # Hoja 2: Métricas del sistema
-            metrics_df = pd.DataFrame([system_metrics])
-            metrics_df.to_excel(writer, sheet_name='Métricas', index=False)
-            
-            # Hoja 3: Resultados backtest
-            backtest_df = pd.DataFrame([{
-                'Bankroll Inicial': backtest_results.get('initial_bankroll', 0),
-                'Bankroll Final Promedio': backtest_results.get('avg_final_bankroll', 0),
-                'Win Rate': backtest_results.get('win_rate', 0),
-                'Max Drawdown Promedio': backtest_results.get('avg_max_drawdown', 0),
-                'Sharpe Ratio Promedio': backtest_results.get('avg_sharpe', 0)
-            }])
-            backtest_df.to_excel(writer, sheet_name='Backtest', index=False)
-        
-        return {
-            'data': output.getvalue(),
-            'filename': 's73_portfolio_report.xlsx',
-            'mime': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        }
-    
-    @staticmethod
-    def generate_summary_text(
-        columns_df: pd.DataFrame,
-        system_metrics: Dict,
-        backtest_results: Dict
-    ) -> str:
-        """Genera resumen en texto del portafolio."""
-        summary = f"""
-        ============================================
-        RESUMEN SISTEMA S73 v3.0
-        ============================================
-        
-        📊 METRÍAS DEL SISTEMA
-        -----------------------
-        • Número de columnas: {system_metrics.get('n_columns', 0)}
-        • Exposición total: {system_metrics.get('total_exposure', 0):.1f}%
-        • Inversión total: €{system_metrics.get('total_investment', 0):.2f}
-        • Valor esperado promedio: {system_metrics.get('avg_expected_value', 0):.3f}
-        
-        🎯 RESULTADOS BACKTEST
-        ----------------------
-        • Bankroll final promedio: €{backtest_results.get('avg_final_bankroll', 0):.2f}
-        • Win Rate: {backtest_results.get('win_rate', 0):.1%}
-        • Máximo Drawdown promedio: {backtest_results.get('avg_max_drawdown', 0):.1f}%
-        • Sharpe Ratio promedio: {backtest_results.get('avg_sharpe', 0):.2f}
-        
-        📈 MEJORES COLUMNAS
-        -------------------
-        """
-        
-        # Añadir top 5 columnas
-        if not columns_df.empty:
-            top_columns = columns_df.nlargest(5, 'Probabilidad')
-            for idx, row in top_columns.iterrows():
-                summary += f"\n{row['ID']}. {row['Combinación']} - Prob: {row['Probabilidad']:.2%}, Cuota: {row['Cuota']:.2f}"
-        
-        summary += "\n\n============================================"
-        return summary
-
 # ============================================================================
 # SECCIÓN 6: PORTFOLIO ENGINE DE DOBLE ESTRATEGIA v3.0
 # ============================================================================
@@ -6565,4 +6325,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
