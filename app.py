@@ -380,6 +380,10 @@ class SessionStateManager:
         if 'kelly_stakes' in results:
             st.session_state.s73_kelly_stakes = results['kelly_stakes']
         
+        # Asegurar que columns_df esté guardado
+        if 'columns_df' in results:
+            st.session_state.s73_columns_df = results['columns_df']
+        
         # Extraer datos elite si existen
         if 'elite_combinations' in results:
             st.session_state.elite_columns = results['elite_combinations']
@@ -388,12 +392,12 @@ class SessionStateManager:
         if 'elite_scores' in results:
             st.session_state.elite_scores = results['elite_scores']
         
-        # Calcular y guardar apuesta maestra
+        # Calcular y guardar apuesta maestra usando la versión corregida
         SessionStateManager._calculate_master_bet(results)
         
         st.session_state.last_updated = datetime.now().isoformat()
         SessionStateManager._log_activity("save_s73_results", 
-                                         columns_count=len(results.get('combinations', [])))
+                                        columns_count=len(results.get('combinations', [])))
     
     @staticmethod
     def save_scenario_results(results: Dict[str, Any]):
@@ -550,17 +554,31 @@ class SessionStateManager:
             return
         
         try:
-            # Verificar si tenemos columns_df o si necesitamos crearlo
-            if 'columns_df' not in results:
-                # Intentar crear columns_df si tenemos los datos necesarios
-                if all(key in results for key in ['combinations', 'probabilities', 'kelly_stakes']):
-                    # Aquí necesitaríamos odds_matrix y bankroll que no están en results
-                    # Por ahora, simplemente retornamos
-                    return
-                else:
-                    return
+            # Verificar si tenemos columns_df en resultados o en session_state
+            columns_df = None
             
-            columns_df = results['columns_df']
+            # Intentar obtener de results
+            if 'columns_df' in results:
+                columns_df = results['columns_df']
+            # Si no, buscar en session_state
+            elif 's73_results' in st.session_state and 'columns_df' in st.session_state.s73_results:
+                columns_df = st.session_state.s73_results['columns_df']
+            
+            # Si aún no hay columns_df, intentar crear uno
+            if columns_df is None and all(key in results for key in ['combinations', 'probabilities', 'kelly_stakes']):
+                # Intentar crear columns_df si tenemos los datos necesarios
+                try:
+                    columns_df = ACBEProfessionalApp.create_columns_dataframe(
+                        results['combinations'],
+                        results['probabilities'],
+                        results.get('odds_matrix'),  # Puede no estar
+                        results.get('normalized_entropies', np.zeros(6)),
+                        results['kelly_stakes'],
+                        results.get('bankroll', SystemConfig.DEFAULT_BANKROLL)
+                    )
+                except:
+                    # Si no podemos crear columns_df, simplemente retornamos
+                    return
             
             # Verificar que columns_df no esté vacío
             if columns_df is None or columns_df.empty:
@@ -584,11 +602,97 @@ class SessionStateManager:
                 }
                 
                 SessionStateManager._log_activity("calculate_master_bet", 
-                                                 combination=master_bet.get('Combinación'))
+                                                combination=master_bet.get('Combinación'))
         except Exception as e:
             # No fallar si hay error en cálculo de apuesta maestra
             SessionStateManager._log_activity("calculate_master_bet_error", 
-                                             error=str(e))
+                                            error=str(e))
+        
+    @staticmethod
+    def get_columns_df() -> Optional[pd.DataFrame]:
+        """
+        Obtiene columns_df desde cualquier fuente disponible.
+        
+        Returns:
+            DataFrame de columnas o None si no está disponible
+        """
+        import numpy as np
+        import pandas as pd
+        from system_components import S73System, SystemConfig  # Asegúrate de importar
+        
+        # Intentar desde session_state primero
+        if 's73_results' in st.session_state and 'columns_df' in st.session_state.s73_results:
+            return st.session_state.s73_results['columns_df']
+        
+        # Intentar desde resultados guardados en variables individuales
+        if 's73_columns_df' in st.session_state:
+            return st.session_state.s73_columns_df
+        
+        # Intentar crear desde datos básicos
+        if all(key in st.session_state for key in ['s73_columns', 's73_probabilities', 's73_kelly_stakes']):
+            try:
+                # Obtener datos necesarios
+                matches_data = st.session_state.get('matches_data', {})
+                odds_matrix = matches_data.get('odds_matrix')
+                normalized_entropies = matches_data.get('normalized_entropies')
+                bankroll = st.session_state.get('user_config', {}).get('bankroll', SystemConfig.DEFAULT_BANKROLL)
+                
+                if odds_matrix is not None:
+                    # Llamar al método estático create_columns_dataframe
+                    # Esto funciona porque todos los archivos están en el mismo módulo
+                    return SessionStateManager.create_columns_dataframe(
+                        st.session_state.s73_columns,
+                        st.session_state.s73_probabilities,
+                        odds_matrix,
+                        normalized_entropies if normalized_entropies is not None else np.zeros(6),
+                        st.session_state.s73_kelly_stakes,
+                        bankroll
+                    )
+            except Exception as e:
+                print(f"⚠️ No se pudo crear columns_df: {e}")
+        
+        return None
+    
+    @staticmethod
+    def create_columns_dataframe(combinations: np.ndarray,
+                                probabilities: np.ndarray,
+                                odds_matrix: np.ndarray,
+                                normalized_entropies: np.ndarray,
+                                stakes: np.ndarray,
+                                bankroll: float) -> pd.DataFrame:
+        """
+        Versión alternativa de create_columns_dataframe para SessionStateManager.
+        """
+        data = []
+        
+        for i, (combo, prob, stake) in enumerate(zip(combinations, probabilities, stakes), 1):
+            # Calcular cuota conjunta
+            selected_odds = odds_matrix[np.arange(6), combo]
+            combo_odds = np.prod(selected_odds)
+            
+            # Calcular EV
+            ev = prob * combo_odds - 1
+            
+            # Calcular entropía promedio
+            avg_entropy = np.mean([normalized_entropies[j] for j in range(6)])
+            
+            # Convertir combinación a string
+            outcome_labels = SystemConfig.OUTCOME_LABELS
+            combo_str = ''.join([outcome_labels[int(sign)] for sign in combo])
+            
+            data.append({
+                'ID': i,
+                'Combinación': combo_str,
+                'Probabilidad': prob,
+                'Cuota': combo_odds,
+                'Valor Esperado': ev,
+                'Entropía Prom.': avg_entropy,
+                'Stake (%)': stake * 100,
+                'Inversión (€)': stake * bankroll,
+                'Tipo': 'Cobertura'
+            })
+        
+        return pd.DataFrame(data).sort_values('Probabilidad', ascending=False)
 
 # ============================================================================
 # INICIALIZACIÓN GLOBAL DEL ESTADO
@@ -6061,12 +6165,15 @@ class ACBEProfessionalApp:
                 kelly_stakes, config['bankroll']
             )
             
-            # En generate_s73_system(), después de crear columns_df:
+            # Asegurar que columns_df esté en s73_results
             s73_results = {
                 'combinations': s73_combo,
                 'probabilities': s73_probs,
                 'kelly_stakes': kelly_stakes,
-                'columns_df': columns_df,  # ¡AÑADIR ESTA LÍNEA!
+                'columns_df': columns_df,  # Asegurar que está presente
+                'odds_matrix': odds_matrix,  # Añadir también
+                'normalized_entropies': normalized_entropies,  # Añadir también
+                'bankroll': config['bankroll'],  # Añadir también
                 'metrics': {
                     's73': s73_metrics,
                     'stakes': stake_metrics,
@@ -6078,9 +6185,9 @@ class ACBEProfessionalApp:
             }
             
             # Guardar en estado
-            SessionStateManager.save_s73_results(s73_results)  # Guardar en estado
-            st.session_state.s73_results = s73_results          # Backup directo
-            st.session_state.system_ready = True                # Marcar listo
+            SessionStateManager.save_s73_results(s73_results)
+            st.session_state.s73_results = s73_results
+            st.session_state.system_ready = True
             
             return s73_results
     
