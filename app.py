@@ -1535,6 +1535,13 @@ class MatchInputLayer:
             'viable': viable              # Añadir para validación
         }
         
+        # 🔥 CRÍTICO: Guardar en session_state para acceso posterior
+        st.session_state['complete_data'] = complete_data
+        st.session_state['s73_ready'] = True  # Marcar que los datos están listos
+
+        # Mostrar mensaje de éxito
+        st.success("✅ Datos cargados y analizados - Puedes proceder a S73")
+     
         return complete_data
 
     @staticmethod
@@ -5649,22 +5656,7 @@ class ACBEProfessionalApp:
         
         # Botón para proceder al sistema S73
         if st.button("🧮 Generar Sistema S73 con Cobertura 2 Errores", type="primary"):
-            # Guardar todo en session_state
-            st.session_state.update({
-                'matches_data': {
-                    'probabilities': probabilities,
-                    'odds_matrix': odds_matrix,
-                    'normalized_entropies': normalized_entropies,
-                    'matches_df': matches_df,
-                    'allowed_signs': allowed_signs,
-                    'classifications': classifications
-                },
-                'params_dict': params_dict,
-                'data_loaded': True,
-                'processing_done': True,
-                'mode': params_dict['mode']
-            })
-                
+            # Ya todo está guardado en session_state, solo mover a análisis
             SessionStateManager.move_to_analysis()
             st.rerun()
     
@@ -5801,14 +5793,18 @@ class ACBEProfessionalApp:
             st.error("❌ No hay datos cargados. Vuelve a la fase de input.")
             return
         
-        # Extraer datos
+        # Extraer datos CORRECTAMENTE
         matches_data = st.session_state.get('matches_data', {})
+        if not matches_data:
+            st.error("❌ Los datos no se cargaron correctamente")
+            return
+            
         probabilities = matches_data.get('probabilities')
         odds_matrix = matches_data.get('odds_matrix')
         normalized_entropies = matches_data.get('normalized_entropies')
         
         if probabilities is None or odds_matrix is None:
-            st.error("❌ Datos incompletos")
+            st.error("❌ Datos incompletos. Faltan probabilidades o cuotas")
             return
         
         # Pestañas principales
