@@ -546,14 +546,28 @@ class SessionStateManager:
         Args:
             results: Resultados del sistema S73
         """
-        if not results or 'columns_df' not in results:
+        if not results:
             return
         
         try:
+            # Verificar si tenemos columns_df o si necesitamos crearlo
+            if 'columns_df' not in results:
+                # Intentar crear columns_df si tenemos los datos necesarios
+                if all(key in results for key in ['combinations', 'probabilities', 'kelly_stakes']):
+                    # Aquí necesitaríamos odds_matrix y bankroll que no están en results
+                    # Por ahora, simplemente retornamos
+                    return
+                else:
+                    return
+            
             columns_df = results['columns_df']
             
+            # Verificar que columns_df no esté vacío
+            if columns_df is None or columns_df.empty:
+                return
+            
             # Encontrar la columna con mayor probabilidad
-            if not columns_df.empty and 'Probabilidad' in columns_df.columns:
+            if 'Probabilidad' in columns_df.columns:
                 master_idx = columns_df['Probabilidad'].idxmax()
                 master_bet = columns_df.loc[master_idx].to_dict()
                 
@@ -6047,12 +6061,12 @@ class ACBEProfessionalApp:
                 kelly_stakes, config['bankroll']
             )
             
-            # 5. Preparar resultados
+            # En generate_s73_system(), después de crear columns_df:
             s73_results = {
                 'combinations': s73_combo,
                 'probabilities': s73_probs,
                 'kelly_stakes': kelly_stakes,
-                'columns_df': columns_df,
+                'columns_df': columns_df,  # ¡AÑADIR ESTA LÍNEA!
                 'metrics': {
                     's73': s73_metrics,
                     'stakes': stake_metrics,
@@ -6064,8 +6078,9 @@ class ACBEProfessionalApp:
             }
             
             # Guardar en estado
-            st.session_state.s73_results = s73_results
-            st.session_state.system_ready = True
+            SessionStateManager.save_s73_results(s73_results)  # Guardar en estado
+            st.session_state.s73_results = s73_results          # Backup directo
+            st.session_state.system_ready = True                # Marcar listo
             
             return s73_results
     
