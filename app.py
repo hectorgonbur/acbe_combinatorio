@@ -11,9 +11,10 @@ from datetime import datetime
 import io
 import time
 import warnings
-from typing import Dict, Any, List, Optional, Tuple, Union  # ← AÑADIR
-import itertools  # ← FALTA
-from collections import defaultdict  # ← FALTA
+from typing import Dict, Any, List, Optional, Tuple, Union
+import itertools  # ← AÑADIR
+from collections import defaultdict  # ← AÑADIR
+import plotly.express as px  # ← AÑADIR si se usa en alguna parte (en el código veo que se usa en la línea ~1200)
 warnings.filterwarnings('ignore')
 
 # ============================================================================
@@ -575,28 +576,28 @@ class SessionStateManager:
             SessionStateManager._log_activity("calculate_master_bet_error", 
                                              error=str(e))
 
-    # ============================================================================
-    # INICIALIZACIÓN GLOBAL DEL ESTADO
-    # ============================================================================
+# ============================================================================
+# INICIALIZACIÓN GLOBAL DEL ESTADO
+# ============================================================================
 
-    def initialize_global_state():
-        """
-        Función de inicialización global del estado.
-        Debe llamarse al inicio de cada ejecución de Streamlit.
-        """
-        # Inicializar estado de sesión
-        SessionStateManager.initialize_session_state()
+def initialize_global_state():
+    """
+    Función de inicialización global del estado.
+    Debe llamarse al inicio de cada ejecución de Streamlit.
+    """
+    # Inicializar estado de sesión
+    SessionStateManager.initialize_session_state()
         
-        # Validar estado actual
-        problems = SessionStateManager.validate_state()
+    # Validar estado actual
+    problems = SessionStateManager.validate_state()
         
-        # Si hay problemas, intentar reparar automáticamente
-        if problems:
-            print(f"⚠️ Problemas en estado de sesión: {problems}")
-            # Para v3.0, podemos intentar reparaciones automáticas simples
-            # Por ahora, solo logueamos los problemas
+    # Si hay problemas, intentar reparar automáticamente
+    if problems:
+        print(f"⚠️ Problemas en estado de sesión: {problems}")
+        # Para v3.0, podemos intentar reparaciones automáticas simples
+        # Por ahora, solo logueamos los problemas
         
-        return True
+    return True
 # ============================================================================
 # SECCIÓN 1: CONFIGURACIÓN DEL SISTEMA - PROFESIONAL v3.0
 # ============================================================================
@@ -1135,33 +1136,33 @@ class SystemConfig:
             'kelly_multipliers': SystemConfig.KELLY_MULTIPLIERS
         }
 
-    # ============================================================================
-    # VALIDACIÓN AUTOMÁTICA AL IMPORTAR
-    # ============================================================================
+# ============================================================================
+# VALIDACIÓN AUTOMÁTICA AL IMPORTAR
+# ============================================================================
 
-    def validate_system_config():
-        """
-        Valida la configuración del sistema al importar el módulo.
+def validate_system_config():
+    """
+    Valida la configuración del sistema al importar el módulo.
+       
+    Raises:
+        ValueError: Si hay inconsistencias en la configuración
+    """
+    problems = SystemConfig.validate_configuration()
         
-        Raises:
-            ValueError: Si hay inconsistencias en la configuración
-        """
-        problems = SystemConfig.validate_configuration()
+    if problems:
+        error_message = "Errores en configuración del sistema:\n" + "\n".join(f"  - {problem}" for problem in problems)
+        raise ValueError(error_message)
         
-        if problems:
-            error_message = "Errores en configuración del sistema:\n" + "\n".join(f"  - {problem}" for problem in problems)
-            raise ValueError(error_message)
-        
-        return True
+    return True
 
 
-    # Validar al importar
-    try:
-        validate_system_config()
-        print("✅ Configuración del sistema validada exitosamente")
-    except ValueError as e:
-        print(f"❌ Error en configuración del sistema: {e}")
-        # No raise para permitir ejecución, pero mostrar advertencia
+# Validar al importar
+try:
+    validate_system_config()
+    print("✅ Configuración del sistema validada exitosamente")
+except ValueError as e:
+    print(f"❌ Error en configuración del sistema: {e}")
+    # No raise para permitir ejecución, pero mostrar advertencia
         
 class ACBEModel:
     """Modelo Bayesiano Gamma-Poisson optimizado."""
@@ -6306,22 +6307,8 @@ class ACBEAppV3:
 
 def main():
     """Función principal de la aplicación."""
-    # Verificar dependencias
-    try:
-        import streamlit as st
-        import numpy as np
-        import pandas as pd
-        import plotly.graph_objects as go
-        from plotly.subplots import make_subplots
-    except ImportError as e:
-        st.error(f"❌ Error de dependencias: {str(e)}")
-        st.info("Instala las dependencias con: pip install -r requirements.txt")
-        return
-    
-    # Inicializar y ejecutar aplicación
     app = ACBEAppV3()
     app.run()
-
 
 if __name__ == "__main__":
     main()
