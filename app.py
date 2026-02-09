@@ -1,4 +1,19 @@
 # ============================================================================
+# IMPORTACIONES GENERALES
+# ============================================================================
+
+import streamlit as st
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from datetime import datetime
+import io
+import time
+import warnings
+warnings.filterwarnings('ignore')
+
+# ============================================================================
 # SECCIÓN 0: MANEJO DE ESTADO DE SESIÓN - PROFESIONAL v3.0
 # ============================================================================
 
