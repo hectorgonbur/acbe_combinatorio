@@ -6095,21 +6095,43 @@ class ACBEProfessionalApp:
             self.render_acbe_analysis(
                 probabilities, odds_matrix, normalized_entropies, config
             )
-
+            
         # ===== PESTAÑA 2: SISTEMA S73 =====
         with tabs[1]:
-            # Si no hay resultados previos, mostrar botón o generar
-            if s73_results is None:
+            # Recuperamos el estado actual
+            s73_results_state = st.session_state.get('s73_results')
+            
+            if s73_results_state is None:
                 st.info("El sistema S73 no ha sido generado aún.")
+                
+                # Botón de generación
                 if st.button("⚙️ Generar Sistema S73 (Cobertura 2 Errores)", type="primary"):
-                    s73_results = self.generate_s73_system(
+                    # 1. Ejecutar la generación
+                    results = self.generate_s73_system(
                         probabilities, odds_matrix, normalized_entropies, config
                     )
-                    # Forzar recarga para actualizar la UI
-                    st.rerun()
+                    
+                    # 2. Si hubo éxito (results no es None)
+                    if results is not None:
+                        # Guardamos en Session State explícitamente
+                        st.session_state.s73_results = results
+                        st.session_state.s73_executed = True
+                        
+                        # Mensaje de éxito temporal
+                        st.success("✅ ¡Sistema Generado Exitosamente! Actualizando...")
+                        
+                        # 3. RECARGA FORZADA (CRUCIAL PARA EVITAR EL PARPADEO VACÍO)
+                        time.sleep(0.5) # Pequeña pausa para ver el mensaje
+                        st.rerun()
             else:
-                # Si ya existen, renderizar
-                self.render_s73_system_detailed(s73_results, config)
+                # Si ya existen resultados, mostrar la interfaz detallada
+                # Botón para regenerar si se desea cambiar parámetros
+                if st.button("🔄 Regenerar Sistema S73"):
+                    st.session_state.s73_results = None
+                    st.session_state.s73_executed = False
+                    st.rerun()
+                    
+                self.render_s73_system_detailed(s73_results_state, config)
 
         # ===== PESTAÑA 3: PORTAFOLIO ELITE =====
         with tabs[2]:
@@ -6299,93 +6321,89 @@ class ACBEProfessionalApp:
         """Genera sistema S73 completo."""
         with st.spinner("🧮 Construyendo sistema S73 optimizado..."):
             # 1. Generar combinaciones pre-filtradas
-            try:
-                filtered_combo, filtered_probs, allowed_signs = S73System.generate_prefiltered_combinations(
-                    probabilities, normalized_entropies, odds_matrix, config['apply_s73_filters']
-                )
+            filtered_combo, filtered_probs, allowed_signs = S73System.generate_prefiltered_combinations(
+                probabilities, normalized_entropies, odds_matrix, config['apply_s73_filters']
+            )
                 
-                # 2. Construir sistema de cobertura
-                s73_combo, s73_probs, s73_metrics = S73System.build_s73_coverage_system(
-                    filtered_combo, filtered_probs, validate_coverage=True, verbose=True
-                )
+            # 2. Construir sistema de cobertura
+            s73_combo, s73_probs, s73_metrics = S73System.build_s73_coverage_system(
+                filtered_combo, filtered_probs, validate_coverage=True, verbose=True
+            )
                 
-                # 3. Calcular stakes Kelly
-                kelly_stakes, stake_metrics = KellyCapitalManagement.calculate_column_kelly_stakes(
-                    combinations=s73_combo,
-                    probabilities=s73_probs,
-                    odds_matrix=odds_matrix,
-                    normalized_entropies=normalized_entropies,
-                    kelly_fraction=config.get('kelly_fraction', 0.5),
-                    manual_stake=config.get('manual_stake'),
-                    portfolio_type=config['portfolio_type'],
-                    max_exposure=config['max_exposure'],
-                    bankroll=config['bankroll']
-                )
+            # 3. Calcular stakes Kelly
+            kelly_stakes, stake_metrics = KellyCapitalManagement.calculate_column_kelly_stakes(
+                combinations=s73_combo,
+                probabilities=s73_probs,
+                odds_matrix=odds_matrix,
+                normalized_entropies=normalized_entropies,
+                kelly_fraction=config.get('kelly_fraction', 0.5),
+                manual_stake=config.get('manual_stake'),
+                portfolio_type=config['portfolio_type'],
+                max_exposure=config['max_exposure'],
+                bankroll=config['bankroll']
+            )
                 
-                # CAPA CRÍTICA: Crear columns_df con validación
-                columns_df = self.create_columns_dataframe(
-                    s73_combo, s73_probs, odds_matrix, normalized_entropies,
-                    kelly_stakes, config['bankroll']
-                )
+            # CAPA CRÍTICA: Crear columns_df con validación
+            columns_df = self.create_columns_dataframe(
+                s73_combo, s73_probs, odds_matrix, normalized_entropies,
+                kelly_stakes, config['bankroll']
+            )
                 
-                # VALIDACIÓN EXPLÍCITA
-                if columns_df.empty:
-                    st.warning("⚠️ DataFrame de columnas vacío. Regenerando con datos mínimos...")
+            # VALIDACIÓN EXPLÍCITA
+            if columns_df.empty:
+                st.warning("⚠️ DataFrame de columnas vacío. Regenerando con datos mínimos...")
                     
-                # 4. Crear DataFrame de columnas (IMPORTANTE: asegurar que exista)
-                columns_df = self.create_columns_dataframe(
-                    s73_combo, s73_probs, odds_matrix, normalized_entropies,
-                    kelly_stakes, config['bankroll']
-                )
+            # 4. Crear DataFrame de columnas (IMPORTANTE: asegurar que exista)
+            columns_df = self.create_columns_dataframe(
+                s73_combo, s73_probs, odds_matrix, normalized_entropies,
+                kelly_stakes, config['bankroll']
+            )
                 
-                # Asegurar tipos de datos correctos
-                columns_df = columns_df.astype({
-                    'Probabilidad': 'float64',
-                    'Cuota': 'float64',
-                    'Valor Esperado': 'float64',
-                    'Entropía Prom.': 'float64',
-                    'Stake (%)': 'float64',
-                    'Inversión (€)': 'float64'
-                })
+            # Asegurar tipos de datos correctos
+            columns_df = columns_df.astype({
+                'Probabilidad': 'float64',
+                'Cuota': 'float64',
+                'Valor Esperado': 'float64',
+                'Entropía Prom.': 'float64',
+                'Stake (%)': 'float64',
+                'Inversión (€)': 'float64'
+            })
                 
-                # Asegurar que columns_df esté en s73_results
-                s73_results = {
-                    'combinations': s73_combo,
-                    'probabilities': s73_probs,
-                    'kelly_stakes': kelly_stakes,
-                    'columns_df': columns_df,  # ¡GARANTIZADO!
-                    'odds_matrix': odds_matrix,
-                    'normalized_entropies': normalized_entropies,
-                    'bankroll': config['bankroll'],
-                    'metrics': {
-                        's73': s73_metrics,
-                        'stakes': stake_metrics,
-                        'filtered_count': len(filtered_combo),
-                        'final_count': len(s73_combo),
-                        'coverage_rate': s73_metrics.get('coverage_rate', 0),
-                        'columns_df_valid': not columns_df.empty,
-                        'columns_count': len(columns_df)
-                    },
-                    'allowed_signs': allowed_signs
-                }
+            # Asegurar que columns_df esté en s73_results
+            s73_results = {
+                'combinations': s73_combo,
+                'probabilities': s73_probs,
+                'kelly_stakes': kelly_stakes,
+                'columns_df': columns_df,  # ¡GARANTIZADO!
+                'odds_matrix': odds_matrix,
+                'normalized_entropies': normalized_entropies,
+                'bankroll': config['bankroll'],
+                'metrics': {
+                    's73': s73_metrics,
+                    'stakes': stake_metrics,
+                    'filtered_count': len(filtered_combo),
+                    'final_count': len(s73_combo),
+                    'coverage_rate': s73_metrics.get('coverage_rate', 0),
+                    'columns_df_valid': not columns_df.empty,
+                    'columns_count': len(columns_df)
+                },
+                'allowed_signs': allowed_signs
+            }
                 
-                # Guardar también en variables individuales para compatibilidad
-                st.session_state.s73_columns = s73_combo
-                st.session_state.s73_probabilities = s73_probs
-                st.session_state.s73_kelly_stakes = kelly_stakes
-                st.session_state.s73_columns_df = columns_df  # Guardar también aquí
+            # Guardar también en variables individuales para compatibilidad
+            st.session_state.s73_columns = s73_combo
+            st.session_state.s73_probabilities = s73_probs
+            st.session_state.s73_kelly_stakes = kelly_stakes
+            st.session_state.s73_columns_df = columns_df  # Guardar también aquí
                 
-                # Marcar como válido
-                st.session_state.s73_data_valid = True
+            # Marcar como válido
+            st.session_state.s73_data_valid = True
                 
-                return s73_results
+            # Guardamos el resultado completo
+            SessionStateManager.save_s73_results(results)
         
-            except Exception as e:
-                st.error(f"❌ Error crítico generando sistema S73: {e}")
-                import traceback
-                st.text(traceback.format_exc())
-                return None # Simplemente devolvemos None en caso de error          
-    
+            return results
+        
     @staticmethod
     def create_columns_dataframe(combinations: np.ndarray,
                                 probabilities: np.ndarray,
@@ -7248,7 +7266,5 @@ def main():
     # Crear y ejecutar aplicación
     app = ACBEProfessionalApp()
     app.run()
-
-
 if __name__ == "__main__":
     main()
