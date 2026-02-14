@@ -41,250 +41,6 @@ class ManualInputData:
     kelly_fraction: float
     matches: List[MatchInput]
 
-
-# ============================================
-# APLICACIÓN PRINCIPAL
-# ============================================
-
-class ACBEApp:
-
-    def __init__(self):
-        self.initialize_session_state()
-        self.acbe_module = ACBEModule()
-        self.s73_module = S73Module()
-        self.portfolio_manager = PortfolioManager(
-            max_kelly=MAX_KELLY,
-            max_exposure=MAX_PORTFOLIO_EXPOSURE
-        )
-        self.montecarloengine =  MonteCarloEngine()
-
-
-    # ----------------------------------------
-    # Inicialización segura del session_state
-    # ----------------------------------------
-    def initialize_session_state(self):
-        if "input_data" not in st.session_state:
-            st.session_state["input_data"] = None
-
-    # ----------------------------------------
-    # Render principal
-    # ----------------------------------------
-    def run(self):
-        st.set_page_config(page_title="ACBE-S73 Manual Institutional v2.0", layout="wide")
-        st.title("ACBE-S73 Manual Institutional v2.0")
-        st.markdown("Sistema Cuantitativo Institucional - Modo Manual Exclusivo")
-
-        self.render_manual_form()
-        self.process_pipeline()
-        self.render_results()
-        self.render_monte_carlo()
-
-    # ----------------------------------------
-    # Formulario Manual Completo
-    # ----------------------------------------
-    def render_manual_form(self):
-
-        with st.form("manual_input_form"):
-
-            st.header("Configuración de Capital")
-
-            bankroll = st.number_input(
-                "Bankroll Inicial",
-                min_value=0.0,
-                step=1000.0,
-                format="%.2f"
-            )
-
-            kelly_fraction = st.slider(
-                "Fracción de Kelly",
-                min_value=0.1,
-                max_value=1.0,
-                value=0.5,
-                step=0.1
-            )
-
-            st.divider()
-            st.header("Carga Manual de Partidos")
-
-            matches = []
-
-            for i in range(MAX_MATCHES):
-
-                st.subheader(f"Partido {i+1}")
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    league = st.text_input(f"Liga {i+1}", key=f"league_{i}")
-                    home_team = st.text_input(f"Equipo Local {i+1}", key=f"home_{i}")
-                    odd_1 = st.number_input(
-                        f"Cuota 1 - Partido {i+1}",
-                        min_value=1.01,
-                        step=0.01,
-                        key=f"odd1_{i}"
-                    )
-
-                with col2:
-                    away_team = st.text_input(f"Equipo Visitante {i+1}", key=f"away_{i}")
-                    odd_x = st.number_input(
-                        f"Cuota X - Partido {i+1}",
-                        min_value=1.01,
-                        step=0.01,
-                        key=f"oddx_{i}"
-                    )
-                    odd_2 = st.number_input(
-                        f"Cuota 2 - Partido {i+1}",
-                        min_value=1.01,
-                        step=0.01,
-                        key=f"odd2_{i}"
-                    )
-
-                matches.append({
-                    "league": league,
-                    "home_team": home_team,
-                    "away_team": away_team,
-                    "odd_1": odd_1,
-                    "odd_x": odd_x,
-                    "odd_2": odd_2
-                })
-
-            submitted = st.form_submit_button("Ejecutar Análisis")
-
-        if submitted:
-            st.session_state["input_data"] = {
-                "bankroll": bankroll,
-                "kelly_fraction": kelly_fraction,
-                "matches": matches
-            }
-
-
-    def process_pipeline(self):
-
-        if "input_data" not in st.session_state:
-            return
-
-        input_data = st.session_state["input_data"]
-
-        # ACBE
-        acbe_results = self.acbe_module.process_matches(input_data)
-        st.session_state["acbe_results"] = acbe_results
-
-        # S73
-        s73_results = self.s73_module.build_s73(acbe_results, input_data)
-        st.session_state["s73_results"] = s73_results
-
-        # Portfolio
-        portfolio_results = self.portfolio_manager.allocate_portfolio(
-            acbe_results=acbe_results,
-            s73_results=s73_results,
-            input_data=input_data,
-            bankroll=input_data["bankroll"],
-            kelly_fraction_user=input_data["kelly_fraction"]
-        )
-
-        st.session_state["portfolio_results"] = portfolio_results
-
-
-        # ----------------------------------------
-        # Confirmación de persistencia
-        # ----------------------------------------
-
-    def render_results(self):
-
-        if "portfolio_results" not in st.session_state:
-            return
-
-        st.header("Resultados Institucionales")
-
-        # ACBE
-        if "acbe_results" in st.session_state:
-
-            results = st.session_state["acbe_results"]
-
-            st.subheader("ACBE")
-
-            for i in range(len(results["probabilities"])):
-
-                st.markdown(f"### Partido {i+1}")
-                st.json(results["probabilities"][i])
-                st.write("Entropía:", round(results["entropy"][i], 4))
-                st.write("Clasificación:", results["classification"][i])
-                st.json(results["ev_matrix"][i])
-                st.divider()
-
-        # S73
-        if "s73_results" in st.session_state:
-
-            st.subheader("Sistema S73")
-
-            for i, col in enumerate(st.session_state["s73_results"]["columns"]):
-
-                st.write(
-                    f"Columna {i+1}: {col['column']} | "
-                    f"P={round(col['joint_probability'],6)} | "
-                    f"Odds={round(col['joint_odds'],3)} | "
-                    f"EV={round(col['joint_ev'],6)}"
-                )
-
-        # Portfolio
-        portfolio = st.session_state["portfolio_results"]
-
-        st.subheader("Portafolio")
-
-        for bet in portfolio["portfolio"]:
-
-            if bet["type"] == "single":
-                st.write(
-                    f"Single M{bet['match_index']} {bet['selection']} | "
-                    f"Stake={round(bet['stake'],2)}"
-                )
-            else:
-                st.write(
-                    f"S73 {bet['column']} | "
-                    f"Stake={round(bet['stake'],2)}"
-                )
-
-        st.write("Exposición total:", round(portfolio["total_exposure"], 2))
-        st.write("ROI esperado:", round(portfolio["roi_expected"], 6))
-
-
-    def render_monte_carlo(self):
-
-        if "portfolio_results" not in st.session_state:
-            return
-
-        st.markdown("### 🔬 Simulación Monte Carlo")
-
-        if st.button("Ejecutar Simulación Monte Carlo"):
-
-            portfolio = st.session_state["portfolio_results"]["portfolio"]
-            bankroll = st.session_state["input_data"]["bankroll"]
-
-            mc_engine = MonteCarloEngine(simulations=10000)
-
-            st.session_state["mc_results"] = mc_engine.simulate_portfolio(
-                portfolio,
-                bankroll
-            )
-
-        if "mc_results" in st.session_state:
-
-            mc = st.session_state["mc_results"]
-
-            st.write("ROI Medio:", round(mc["roi_mean"], 4))
-            st.write("Desvío ROI:", round(mc["roi_std"], 4))
-            st.write("Prob ROI positivo:", round(mc["prob_positive"], 4))
-            st.write("Drawdown Medio:", round(mc["max_dd_mean"], 4))
-            st.write("DD 95%:", round(mc["dd_95"], 4))
-
-# ============================================
-# EJECUCIÓN
-# ============================================
-
-if __name__ == "__main__":
-    app = ACBEApp()
-    app.run()
-
 # ============================================
 # MOTOR MATEMÁTICO ACBE
 # ============================================
@@ -707,3 +463,246 @@ class MonteCarloEngine:
             "roi_5": np.percentile(results, 5),
             "roi_95": np.percentile(results, 95)
         }
+        
+# ============================================
+# APLICACIÓN PRINCIPAL
+# ============================================
+
+class ACBEApp:
+
+    def __init__(self):
+        self.initialize_session_state()
+        self.acbe_module = ACBEModule()
+        self.s73_module = S73Module()
+        self.portfolio_manager = PortfolioManager(
+            max_kelly=MAX_KELLY,
+            max_exposure=MAX_PORTFOLIO_EXPOSURE
+        )
+        self.montecarloengine =  MonteCarloEngine()
+
+
+    # ----------------------------------------
+    # Inicialización segura del session_state
+    # ----------------------------------------
+    def initialize_session_state(self):
+        if "input_data" not in st.session_state:
+            st.session_state["input_data"] = None
+
+    # ----------------------------------------
+    # Render principal
+    # ----------------------------------------
+    def run(self):
+        st.set_page_config(page_title="ACBE-S73 Manual Institutional v2.0", layout="wide")
+        st.title("ACBE-S73 Manual Institutional v2.0")
+        st.markdown("Sistema Cuantitativo Institucional - Modo Manual Exclusivo")
+
+        self.render_manual_form()
+        self.process_pipeline()
+        self.render_results()
+        self.render_monte_carlo()
+
+    # ----------------------------------------
+    # Formulario Manual Completo
+    # ----------------------------------------
+    def render_manual_form(self):
+
+        with st.form("manual_input_form"):
+
+            st.header("Configuración de Capital")
+
+            bankroll = st.number_input(
+                "Bankroll Inicial",
+                min_value=0.0,
+                step=1000.0,
+                format="%.2f"
+            )
+
+            kelly_fraction = st.slider(
+                "Fracción de Kelly",
+                min_value=0.1,
+                max_value=1.0,
+                value=0.5,
+                step=0.1
+            )
+
+            st.divider()
+            st.header("Carga Manual de Partidos")
+
+            matches = []
+
+            for i in range(MAX_MATCHES):
+
+                st.subheader(f"Partido {i+1}")
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    league = st.text_input(f"Liga {i+1}", key=f"league_{i}")
+                    home_team = st.text_input(f"Equipo Local {i+1}", key=f"home_{i}")
+                    odd_1 = st.number_input(
+                        f"Cuota 1 - Partido {i+1}",
+                        min_value=1.01,
+                        step=0.01,
+                        key=f"odd1_{i}"
+                    )
+
+                with col2:
+                    away_team = st.text_input(f"Equipo Visitante {i+1}", key=f"away_{i}")
+                    odd_x = st.number_input(
+                        f"Cuota X - Partido {i+1}",
+                        min_value=1.01,
+                        step=0.01,
+                        key=f"oddx_{i}"
+                    )
+                    odd_2 = st.number_input(
+                        f"Cuota 2 - Partido {i+1}",
+                        min_value=1.01,
+                        step=0.01,
+                        key=f"odd2_{i}"
+                    )
+
+                matches.append({
+                    "league": league,
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "odd_1": odd_1,
+                    "odd_x": odd_x,
+                    "odd_2": odd_2
+                })
+
+            submitted = st.form_submit_button("Ejecutar Análisis")
+
+        if submitted:
+            st.session_state["input_data"] = {
+                "bankroll": bankroll,
+                "kelly_fraction": kelly_fraction,
+                "matches": matches
+            }
+
+
+    def process_pipeline(self):
+
+        if "input_data" not in st.session_state:
+            return
+
+        input_data = st.session_state["input_data"]
+
+        # ACBE
+        acbe_results = self.acbe_module.process_matches(input_data)
+        st.session_state["acbe_results"] = acbe_results
+
+        # S73
+        s73_results = self.s73_module.build_s73(acbe_results, input_data)
+        st.session_state["s73_results"] = s73_results
+
+        # Portfolio
+        portfolio_results = self.portfolio_manager.allocate_portfolio(
+            acbe_results=acbe_results,
+            s73_results=s73_results,
+            input_data=input_data,
+            bankroll=input_data["bankroll"],
+            kelly_fraction_user=input_data["kelly_fraction"]
+        )
+
+        st.session_state["portfolio_results"] = portfolio_results
+
+
+        # ----------------------------------------
+        # Confirmación de persistencia
+        # ----------------------------------------
+
+    def render_results(self):
+
+        if "portfolio_results" not in st.session_state:
+            return
+
+        st.header("Resultados Institucionales")
+
+        # ACBE
+        if "acbe_results" in st.session_state:
+
+            results = st.session_state["acbe_results"]
+
+            st.subheader("ACBE")
+
+            for i in range(len(results["probabilities"])):
+
+                st.markdown(f"### Partido {i+1}")
+                st.json(results["probabilities"][i])
+                st.write("Entropía:", round(results["entropy"][i], 4))
+                st.write("Clasificación:", results["classification"][i])
+                st.json(results["ev_matrix"][i])
+                st.divider()
+
+        # S73
+        if "s73_results" in st.session_state:
+
+            st.subheader("Sistema S73")
+
+            for i, col in enumerate(st.session_state["s73_results"]["columns"]):
+
+                st.write(
+                    f"Columna {i+1}: {col['column']} | "
+                    f"P={round(col['joint_probability'],6)} | "
+                    f"Odds={round(col['joint_odds'],3)} | "
+                    f"EV={round(col['joint_ev'],6)}"
+                )
+
+        # Portfolio
+        portfolio = st.session_state["portfolio_results"]
+
+        st.subheader("Portafolio")
+
+        for bet in portfolio["portfolio"]:
+
+            if bet["type"] == "single":
+                st.write(
+                    f"Single M{bet['match_index']} {bet['selection']} | "
+                    f"Stake={round(bet['stake'],2)}"
+                )
+            else:
+                st.write(
+                    f"S73 {bet['column']} | "
+                    f"Stake={round(bet['stake'],2)}"
+                )
+
+        st.write("Exposición total:", round(portfolio["total_exposure"], 2))
+        st.write("ROI esperado:", round(portfolio["roi_expected"], 6))
+
+
+    def render_monte_carlo(self):
+
+        if "portfolio_results" not in st.session_state:
+            return
+
+        st.markdown("### 🔬 Simulación Monte Carlo")
+
+        if st.button("Ejecutar Simulación Monte Carlo"):
+
+            portfolio = st.session_state["portfolio_results"]["portfolio"]
+            bankroll = st.session_state["input_data"]["bankroll"]
+
+            mc_engine = MonteCarloEngine(simulations=10000)
+
+            st.session_state["mc_results"] = mc_engine.simulate_portfolio(
+                portfolio,
+                bankroll
+            )
+
+        if "mc_results" in st.session_state:
+
+            mc = st.session_state["mc_results"]
+
+            st.write("ROI Medio:", round(mc["roi_mean"], 4))
+            st.write("Desvío ROI:", round(mc["roi_std"], 4))
+            st.write("Prob ROI positivo:", round(mc["prob_positive"], 4))
+            st.write("Drawdown Medio:", round(mc["max_dd_mean"], 4))
+            st.write("DD 95%:", round(mc["dd_95"], 4))
+
+# ============================================
+# EJECUCIÓN
+# ============================================
+
+if __name__ == "__main__":
+    app = ACBEApp()
+    app.run()
