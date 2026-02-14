@@ -56,6 +56,7 @@ class ACBEApp:
             max_kelly=MAX_KELLY,
             max_exposure=MAX_PORTFOLIO_EXPOSURE
         )
+        self.montecarloengine =  MonteCarloEngine()
 
 
     # ----------------------------------------
