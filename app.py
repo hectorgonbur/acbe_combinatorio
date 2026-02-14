@@ -582,10 +582,10 @@ class ACBEApp:
 
     def process_pipeline(self):
 
-        if "input_data" not in st.session_state:
-            return
+        input_data = st.session_state.get("input_data")
 
-        input_data = st.session_state["input_data"]
+        if input_data is None:
+            return
 
         # ACBE
         acbe_results = self.acbe_module.process_matches(input_data)
