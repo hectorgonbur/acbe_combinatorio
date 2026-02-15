@@ -412,6 +412,60 @@ class PortfolioManager:
             "roi_expected": roi_expected
         }
 
+# ============================================================
+# POISSON EDGE MODULE – NIVEL 2 PASO A
+# ============================================================
+
+class PoissonEdgeModule:
+
+    def __init__(self, max_goals=6):
+        self.max_goals = max_goals
+
+    def poisson_prob(self, k, lam):
+        return (lam ** k) * math.exp(-lam) / math.factorial(k)
+
+    def match_probabilities(self, lambda_home, lambda_away):
+
+        matrix = []
+
+        for i in range(self.max_goals):
+            row = []
+            for j in range(self.max_goals):
+                p_home = self.poisson_prob(i, lambda_home)
+                p_away = self.poisson_prob(j, lambda_away)
+                row.append(p_home * p_away)
+            matrix.append(row)
+
+        p_home_win = 0
+        p_draw = 0
+        p_away_win = 0
+
+        for i in range(self.max_goals):
+            for j in range(self.max_goals):
+                if i > j:
+                    p_home_win += matrix[i][j]
+                elif i == j:
+                    p_draw += matrix[i][j]
+                else:
+                    p_away_win += matrix[i][j]
+
+        total = p_home_win + p_draw + p_away_win
+
+        return {
+            "1": p_home_win / total,
+            "X": p_draw / total,
+            "2": p_away_win / total
+        }
+
+    def compute_edge(self, poisson_probs, market_probs):
+
+        edge = {}
+
+        for sign in ["1", "X", "2"]:
+            edge[sign] = poisson_probs[sign] - market_probs[sign]
+
+        return edge
+
 class MonteCarloEngine:
 
     def __init__(self, simulations=10000):
@@ -478,8 +532,8 @@ class ACBEApp:
             max_kelly=MAX_KELLY,
             max_exposure=MAX_PORTFOLIO_EXPOSURE
         )
-        self.montecarloengine =  MonteCarloEngine()
-
+        self.monte_carlo_engine =  MonteCarloEngine()
+        self.poisson_module = PoissonEdgeModule()
 
     # ----------------------------------------
     # Inicialización segura del session_state
@@ -590,6 +644,22 @@ class ACBEApp:
         # ACBE
         acbe_results = self.acbe_module.process_matches(input_data)
         st.session_state["acbe_results"] = acbe_results
+        
+        # Poisson ejemplo simple (dummy)
+        poisson_results = []
+
+        for match in input_data["matches"]:
+            lambda_home = 1.4
+            lambda_away = 1.1
+
+            poisson_probs = self.poisson_module.match_probabilities(
+                lambda_home,
+                lambda_away
+            )
+
+            poisson_results.append(poisson_probs)
+
+        st.session_state["poisson_probs"] = poisson_results
 
         # S73
         s73_results = self.s73_module.build_s73(acbe_results, input_data)
@@ -668,7 +738,14 @@ class ACBEApp:
 
         st.write("Exposición total:", round(portfolio["total_exposure"], 2))
         st.write("ROI esperado:", round(portfolio["roi_expected"], 6))
+        
+        if "poisson_probs" in st.session_state:
 
+            st.subheader("Probabilidades Poisson")
+
+            for i, probs in enumerate(st.session_state["poisson_probs"]):
+                st.write(f"Partido {i+1}")
+                st.json(probs)
 
     def render_monte_carlo(self):
 
