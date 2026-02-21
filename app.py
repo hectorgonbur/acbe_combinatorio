@@ -1,785 +1,260 @@
-# ============================================
-# ACBE-S73 Manual Institutional v2.0
-# Parte 1: Arquitectura Base + UI Manual
-# ============================================
-
 import streamlit as st
-import math
-import numpy as np
-from dataclasses import dataclass, asdict
-from typing import List, Dict
-from itertools import product
-
-# ============================================
-# CONFIGURACIÓN GLOBAL INSTITUCIONAL
-# ============================================
-
-MAX_MATCHES = 6
-MAX_KELLY = 0.03
-MAX_PORTFOLIO_EXPOSURE = 0.15
-
-ALPHA_S73 = 0.25
-
-
-# ============================================
-# MODELOS DE DATOS
-# ============================================
-
-@dataclass
-class MatchInput:
-    league: str
-    home_team: str
-    away_team: str
-    odd_1: float
-    odd_x: float
-    odd_2: float
-
-
-@dataclass
-class ManualInputData:
-    bankroll: float
-    kelly_fraction: float
-    matches: List[MatchInput]
-
-# ============================================
-# MOTOR MATEMÁTICO ACBE
-# ============================================
-
-import math
-
-
-class ACBEModule:
-
-    def __init__(self):
-        pass
-
-    def process_matches(self, input_data: dict) -> dict:
-
-        probabilities = []
-        entropy_list = []
-        classification = []
-        ev_matrix = []
-
-        matches = input_data["matches"]
-
-        for match in matches:
-
-            odd_1 = match["odd_1"]
-            odd_x = match["odd_x"]
-            odd_2 = match["odd_2"]
-
-            # ----------------------------------------
-            # 1️⃣ Probabilidades implícitas
-            # ----------------------------------------
-            p1 = 1 / odd_1
-            px = 1 / odd_x
-            p2 = 1 / odd_2
-
-            prob_sum = p1 + px + p2
-
-            # ----------------------------------------
-            # 2️⃣ Eliminación del margen bookmaker
-            # ----------------------------------------
-            p1_norm = p1 / prob_sum
-            px_norm = px / prob_sum
-            p2_norm = p2 / prob_sum
-
-            probabilities.append({
-                "1": p1_norm,
-                "X": px_norm,
-                "2": p2_norm
-            })
-
-            # ----------------------------------------
-            # 3️⃣ Entropía Shannon base 3
-            # ----------------------------------------
-            entropy = 0
-            for p in [p1_norm, px_norm, p2_norm]:
-                if p > 0:
-                    entropy += -p * math.log(p)
-
-            entropy = entropy / math.log(3)
-
-            entropy_list.append(entropy)
-
-            # ----------------------------------------
-            # 4️⃣ Clasificación estructural
-            # ----------------------------------------
-            if entropy <= 0.45:
-                cls = "Fuerte"
-            elif entropy <= 0.75:
-                cls = "Medio"
-            else:
-                cls = "Caótico"
-
-
-            classification.append(cls)
-
-            # ----------------------------------------
-            # 5️⃣ Expected Value por signo
-            # ----------------------------------------
-            ev_1 = p1_norm * odd_1 - 1
-            ev_x = px_norm * odd_x - 1
-            ev_2 = p2_norm * odd_2 - 1
-
-            ev_matrix.append({
-                "1": ev_1,
-                "X": ev_x,
-                "2": ev_2
-            })
-
-        return {
-            "probabilities": probabilities,
-            "entropy": entropy_list,
-            "classification": classification,
-            "ev_matrix": ev_matrix
-        }
-
-# ============================================
-# SISTEMA S73 ÓPTIMO INSTITUCIONAL
-# ============================================
-
-class S73Module:
-
-    def __init__(self, max_columns=73, alpha=0.25):
-        self.max_columns = max_columns
-        self.alpha = alpha
-        self.sign_map = {0: "1", 1: "X", 2: "2"}
-
-    # -------------------------------------------------
-    # Distancia Hamming
-    # -------------------------------------------------
-    def hamming_distance(self, a, b):
-        return sum(x != y for x, y in zip(a, b))
-
-    # -------------------------------------------------
-    # Construcción S73 Óptimo
-    # -------------------------------------------------
-    def build_s73(self, acbe_results, input_data):
-
-        probabilities = acbe_results["probabilities"]
-        classifications = acbe_results["classification"]
-
-        allowed_space = []
-
-        # 1️⃣ Determinar espacio permitido por partido
-        for i, probs in enumerate(probabilities):
-
-            # ordenar signos por prob descendente
-            sorted_signs = sorted(
-                probs.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )
-
-            if classifications[i] == "Fuerte":
-                allowed = [sorted_signs[0][0]]
-
-            elif classifications[i] == "Medio":
-                allowed = [sorted_signs[0][0], sorted_signs[1][0]]
-
-            else:  # Caótico
-                allowed = ["1", "X", "2"]
-
-            allowed_space.append(allowed)
-
-        # 2️⃣ Producto cartesiano
-        all_combos = list(product(*allowed_space))
-
-        columns_data = []
-
-        # 3️⃣ Calcular métricas conjuntas
-        for combo in all_combos:
-
-            joint_prob = 1.0
-            joint_odds = 1.0
-
-            for i, sign in enumerate(combo):
-
-                # Probabilidad
-                p = probabilities[i][sign]
-                joint_prob *= p
-
-                # Cuota correcta
-                match_data = input_data["matches"][i]
-
-                if sign == "1":
-                    odd = match_data["odd_1"]
-                elif sign == "X":
-                    odd = match_data["odd_x"]
-                else:
-                    odd = match_data["odd_2"]
-
-                joint_odds *= odd
-
-            joint_ev = joint_prob * joint_odds - 1
-
-            # Score institucional
-            if joint_prob > 0:
-                score = math.log(joint_prob) + self.alpha * joint_ev
-            else:
-                score = -9999
-
-            columns_data.append({
-                "column": combo,
-                "joint_probability": joint_prob,
-                "joint_odds": joint_odds,
-                "joint_ev": joint_ev,
-                "score": score
-            })
-
-        # 4️⃣ Ordenar por score descendente
-        columns_data.sort(
-            key=lambda x: x["score"],
-            reverse=True
-        )
-
-        # 5️⃣ Aplicar filtro Hamming ≥ 2
-        selected = []
-
-        for candidate in columns_data:
-
-            if len(selected) >= self.max_columns:
-                break
-
-            if all(
-                self.hamming_distance(candidate["column"], s["column"]) >= 2
-                for s in selected
-            ):
-                selected.append(candidate)
-
-        return {
-            "columns": selected
-        }
-
-# ============================================================
-# PORTFOLIO MANAGER – NIVEL 1 INSTITUCIONAL
-# ============================================================
-
-class PortfolioManager:
-
-    def __init__(self, max_kelly=0.03, max_exposure=0.15):
-        self.max_kelly = max_kelly
-        self.max_exposure = max_exposure
-
-    # =====================================================
-    # Kelly robusto con penalización por entropía
-    # =====================================================
-    def kelly_fraction(self, p, q, entropy, kelly_fraction_user):
-
-        # Kelly bruto
-        numerator = p * q - 1
-        denominator = q - 1
-
-        if denominator <= 0:
-            return 0.0
-
-        f = numerator / denominator
-
-        # No apuestas negativas
-        if f <= 0:
-            return 0.0
-
-        # Aplicar fracción usuario
-        f *= kelly_fraction_user
-
-        # Límite institucional
-        f = min(f, self.max_kelly)
-
-        # Penalización por entropía
-        f *= (1 - entropy)
-
-        return max(0.0, f)
-
-    # =====================================================
-    # Asignación de portafolio completa
-    # =====================================================
-    def allocate_portfolio(self, acbe_results, s73_results,
-                           input_data, bankroll, kelly_fraction_user):
-
-        probabilities = acbe_results["probabilities"]
-        entropies = acbe_results["entropy"]
-        ev_matrix = acbe_results["ev_matrix"]
-
-        portfolio = []
-
-        # =====================================================
-        # 1️⃣ SINGLES
-        # =====================================================
-        for i in range(len(probabilities)):
-
-            for sign in ["1", "X", "2"]:
-
-                p = probabilities[i][sign]
-                ev = ev_matrix[i][sign]
-
-                if ev <= 0:
-                    continue
-
-                # Obtener cuota real del input
-                match = input_data["matches"][i]
-                if sign == "1":
-                    q = match["odd_1"]
-                elif sign == "X":
-                    q = match["odd_x"]
-                else:
-                    q = match["odd_2"]
-
-                entropy = entropies[i]
-
-                f = self.kelly_fraction(p, q, entropy, kelly_fraction_user)
-
-                if f > 0:
-                    portfolio.append({
-                        "type": "single",
-                        "match_index": i,
-                        "selection": sign,
-                        "probability": p,
-                        "odds": q,
-                        "ev": ev,
-                        "entropy": entropy,
-                        "stake_fraction": f
-                    })
-
-        # =====================================================
-        # 2️⃣ COLUMNAS S73
-        # =====================================================
-        for col in s73_results["columns"]:
-
-            joint_prob = col["joint_probability"]
-            joint_odds = col["joint_odds"]
-            joint_ev = col["joint_ev"]
-            combo = col["column"]
-
-            if joint_ev <= 0:
-                continue
-
-            # Entropía promedio de la columna
-            column_entropy = sum(entropies[i] for i in range(len(combo))) / len(combo)
-
-            f = self.kelly_fraction(
-                joint_prob,
-                joint_odds,
-                column_entropy,
-                kelly_fraction_user
-            )
-
-            if f > 0:
-                portfolio.append({
-                    "type": "column",
-                    "column": combo,
-                    "probability": joint_prob,
-                    "odds": joint_odds,
-                    "ev": joint_ev,
-                    "entropy": column_entropy,
-                    "stake_fraction": f
-                })
-
-        # =====================================================
-        # 3️⃣ CONTROL EXPOSICIÓN TOTAL (PROPORCIONAL)
-        # =====================================================
-        total_fraction = sum(bet["stake_fraction"] for bet in portfolio)
-
-        if total_fraction > self.max_exposure and total_fraction > 0:
-
-            scale = self.max_exposure / total_fraction
-
-            for bet in portfolio:
-                bet["stake_fraction"] *= scale
-
-            total_fraction = self.max_exposure
-
-        # =====================================================
-        # 4️⃣ CALCULAR STAKES EN DINERO
-        # =====================================================
-        for bet in portfolio:
-            bet["stake"] = bet["stake_fraction"] * bankroll
-
-        total_exposure = sum(bet["stake"] for bet in portfolio)
-
-        # =====================================================
-        # 5️⃣ ROI ESPERADO AGREGADO
-        # =====================================================
-        roi_expected = sum(
-            bet["stake_fraction"] * bet["ev"]
-            for bet in portfolio
-        )
-
-        return {
-            "portfolio": portfolio,
-            "total_exposure": total_exposure,
-            "total_fraction": total_fraction,
-            "roi_expected": roi_expected
-        }
-
-# ============================================================
-# POISSON EDGE MODULE – NIVEL 2 PASO A
-# ============================================================
-
-class PoissonEdgeModule:
-
-    def __init__(self, max_goals=6):
-        self.max_goals = max_goals
-
-    def poisson_prob(self, k, lam):
-        return (lam ** k) * math.exp(-lam) / math.factorial(k)
-
-    def match_probabilities(self, lambda_home, lambda_away):
-
-        matrix = []
-
-        for i in range(self.max_goals):
-            row = []
-            for j in range(self.max_goals):
-                p_home = self.poisson_prob(i, lambda_home)
-                p_away = self.poisson_prob(j, lambda_away)
-                row.append(p_home * p_away)
-            matrix.append(row)
-
-        p_home_win = 0
-        p_draw = 0
-        p_away_win = 0
-
-        for i in range(self.max_goals):
-            for j in range(self.max_goals):
-                if i > j:
-                    p_home_win += matrix[i][j]
-                elif i == j:
-                    p_draw += matrix[i][j]
-                else:
-                    p_away_win += matrix[i][j]
-
-        total = p_home_win + p_draw + p_away_win
-
-        return {
-            "1": p_home_win / total,
-            "X": p_draw / total,
-            "2": p_away_win / total
-        }
-
-    def compute_edge(self, poisson_probs, market_probs):
-
-        edge = {}
-
-        for sign in ["1", "X", "2"]:
-            edge[sign] = poisson_probs[sign] - market_probs[sign]
-
-        return edge
-
-class MonteCarloEngine:
-
-    def __init__(self, simulations=10000):
-        self.simulations = simulations
-
-    def simulate_portfolio(self, portfolio, bankroll):
-
-        results = []
-        drawdowns = []
-
-        for _ in range(self.simulations):
-
-            current_bankroll = bankroll
-            peak = bankroll
-            max_dd = 0
-
-            for bet in portfolio:
-
-                p = bet["probability"]
-                stake = bet["stake"]
-                odds = bet["odds"]
-
-                outcome = np.random.rand()
-
-                if outcome <= p:
-                    profit = stake * (odds - 1)
-                else:
-                    profit = -stake
-
-                current_bankroll += profit
-
-                if current_bankroll > peak:
-                    peak = current_bankroll
-
-                dd = (peak - current_bankroll) / peak
-                max_dd = max(max_dd, dd)
-
-            roi = (current_bankroll - bankroll) / bankroll
-
-            results.append(roi)
-            drawdowns.append(max_dd)
-
-        return {
-            "roi_mean": np.mean(results),
-            "roi_std": np.std(results),
-            "prob_positive": np.mean(np.array(results) > 0),
-            "max_dd_mean": np.mean(drawdowns),
-            "dd_95": np.percentile(drawdowns, 95),
-            "roi_5": np.percentile(results, 5),
-            "roi_95": np.percentile(results, 95)
-        }
+import itertools
+import pandas as pd
+import json
+from datetime import datetime
+
+# --- CONFIGURACIÓN E INTERFAZ ---
+st.set_page_config(page_title="Betsson Pro: Master Suite", layout="wide")
+st.title("⚽ Betsson Pro: Sistema Profesional (2-10 Partidos)")
+
+# --- INICIALIZACIÓN DE ESTADO (MEMORIA) ---
+if "biblioteca" not in st.session_state:
+    st.session_state["biblioteca"] = {} 
+
+# --- FUNCIONES DE GESTIÓN DE DATOS ---
+def cargar_datos_en_session_state(datos):
+    st.session_state["num_p_slider"] = datos.get("num_p", 6)
+    st.session_state["solo_ganador_check"] = datos.get("solo_ganador", False)
+    st.session_state["err_max_slider"] = datos.get("err_max", 2)
+    st.session_state["apuesta_input"] = datos.get("apuesta_col", 1.0)
+    
+    if "biblioteca" in datos:
+        st.session_state["biblioteca"] = datos["biblioteca"]
+
+    num = datos.get("num_p", 6)
+    for i in range(num):
+        try:
+            st.session_state[f"c_{i}"] = datos["competiciones"][i]
+            st.session_state[f"l_{i}"] = datos["local"][i]
+            st.session_state[f"v_{i}"] = datos["visit"][i]
+            st.session_state[f"b_{i}"] = datos["base"][i]
+            
+            opciones_carga = ["1", "2"] if datos.get("solo_ganador") else ["1", "X", "2"]
+            for op in opciones_carga:
+                st.session_state[f"q_{op}_{i}"] = datos["cuotas"][i].get(op, 1.0)
+        except IndexError:
+            pass
+
+def genera_sistema(base_user, err_maxima, quotes, costo, ops):
+    combinazioni = itertools.product(ops, repeat=len(base_user))
+    sistema = []
+    
+    for c in combinazioni:
+        diff = sum(1 for i in range(len(base_user)) if c[i] != base_user[i])
         
-# ============================================
-# APLICACIÓN PRINCIPAL
-# ============================================
+        # Filtro de errores
+        if diff <= err_maxima:
+            quota_tot = 1.0
+            for idx, s in enumerate(c):
+                quota_tot *= quotes[idx][s]
+            
+            # --- CAMBIO: ELIMINADA LA COLUMNA "QUOTA TOTAL" ---
+            # Nos quedamos solo con el dinero, que es lo que importa.
+            sistema.append({
+                "Columna": "-".join(c),
+                "Fallos": diff,
+                "Ganancia Bruta (€)": round(quota_tot * costo, 2)
+            })
+    return pd.DataFrame(sistema)
 
-class ACBEApp:
+# --- BARRA LATERAL: ARCHIVOS ---
+st.sidebar.header("📂 Gestión de Archivos")
+archivo_subido = st.sidebar.file_uploader("Cargar Jugada/Historial", type=["json"])
 
-    def __init__(self):
-        self.initialize_session_state()
-        self.acbe_module = ACBEModule()
-        self.s73_module = S73Module()
-        self.portfolio_manager = PortfolioManager(
-            max_kelly=MAX_KELLY,
-            max_exposure=MAX_PORTFOLIO_EXPOSURE
-        )
-        self.monte_carlo_engine =  MonteCarloEngine()
-        self.poisson_module = PoissonEdgeModule()
+if archivo_subido is not None:
+    try:
+        datos_cargados = json.load(archivo_subido)
+        if st.sidebar.button("🔄 Restaurar Todo"):
+            cargar_datos_en_session_state(datos_cargados)
+            st.toast("Datos restaurados.", icon="✅")
+            st.rerun()
+    except Exception as e:
+        st.sidebar.error(f"Error: {e}")
 
-    # ----------------------------------------
-    # Inicialización segura del session_state
-    # ----------------------------------------
-    def initialize_session_state(self):
-        if "input_data" not in st.session_state:
-            st.session_state["input_data"] = None
+st.sidebar.divider()
 
-    # ----------------------------------------
-    # Render principal
-    # ----------------------------------------
-    def run(self):
-        st.set_page_config(page_title="ACBE-S73 Manual Institutional v2.0", layout="wide")
-        st.title("ACBE-S73 Manual Institutional v2.0")
-        st.markdown("Sistema Cuantitativo Institucional - Modo Manual Exclusivo")
+# --- CONFIGURACIÓN PARAMETROS ---
+st.sidebar.header("⚙️ Configuración")
+num_p = st.sidebar.slider("Partidos", 2, 10, key="num_p_slider", value=6)
+solo_ganador = st.sidebar.checkbox("Modo 2 Resultados", key="solo_ganador_check", value=False)
+err_max = st.sidebar.select_slider("Errores permitidos", options=[0, 1, 2, 3, 4, 5], key="err_max_slider", value=2)
+apuesta_col = st.sidebar.number_input("Inversión por columna (€)", min_value=0.1, key="apuesta_input", value=1.0)
 
-        self.render_manual_form()
-        self.process_pipeline()
-        self.render_results()
-        self.render_monte_carlo()
+opciones = ["1", "2"] if solo_ganador else ["1", "X", "2"]
 
-    # ----------------------------------------
-    # Formulario Manual Completo
-    # ----------------------------------------
-    def render_manual_form(self):
+# --- GRID DE ENTRADA ---
+st.subheader("1. Definir Partidos y Cuotas")
+matriz_cuotas, col_base, equipos_local, equipos_visit, competiciones = [], [], [], [], []
 
-        with st.form("manual_input_form"):
+grid = st.columns(2)
+for i in range(num_p):
+    with grid[i % 2]:
+        with st.expander(f"PARTIDO {i+1}", expanded=True):
+            comp = st.text_input("Torneo", key=f"c_{i}", value="Liga")
+            competiciones.append(comp)
+            
+            c_l, c_v = st.columns(2)
+            loc = c_l.text_input("Local", key=f"l_{i}", value=f"Local {i+1}")
+            vis = c_v.text_input("Visitante", key=f"v_{i}", value=f"Visitante {i+1}")
+            equipos_local.append(loc); equipos_visit.append(vis)
 
-            st.header("Configuración de Capital")
+            c_b, c_qs = st.columns([1, 3])
+            b = c_b.selectbox("Base", opciones, key=f"b_{i}")
+            col_base.append(b)
+            
+            q_cols = c_qs.columns(len(opciones))
+            d_q = {}
+            for j, op in enumerate(opciones):
+                val_q = q_cols[j].number_input(f"Q{op}", min_value=1.01, key=f"q_{op}_{i}", value=2.0)
+                d_q[op] = val_q
+            matriz_cuotas.append(d_q)
 
-            bankroll = st.number_input(
-                "Bankroll Inicial",
-                min_value=0.0,
-                step=1000.0,
-                format="%.2f"
-            )
+# --- CÁLCULO Y VISUALIZACIÓN DEL SISTEMA ---
+st.divider()
+st.subheader("2. Tabla de Combinaciones y Ganancias")
 
-            kelly_fraction = st.slider(
-                "Fracción de Kelly",
-                min_value=0.1,
-                max_value=1.0,
-                value=0.5,
-                step=0.1
-            )
-
-            st.divider()
-            st.header("Carga Manual de Partidos")
-
-            matches = []
-
-            for i in range(MAX_MATCHES):
-
-                st.subheader(f"Partido {i+1}")
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    league = st.text_input(f"Liga {i+1}", key=f"league_{i}")
-                    home_team = st.text_input(f"Equipo Local {i+1}", key=f"home_{i}")
-                    odd_1 = st.number_input(
-                        f"Cuota 1 - Partido {i+1}",
-                        min_value=1.01,
-                        step=0.01,
-                        key=f"odd1_{i}"
-                    )
-
-                with col2:
-                    away_team = st.text_input(f"Equipo Visitante {i+1}", key=f"away_{i}")
-                    odd_x = st.number_input(
-                        f"Cuota X - Partido {i+1}",
-                        min_value=1.01,
-                        step=0.01,
-                        key=f"oddx_{i}"
-                    )
-                    odd_2 = st.number_input(
-                        f"Cuota 2 - Partido {i+1}",
-                        min_value=1.01,
-                        step=0.01,
-                        key=f"odd2_{i}"
-                    )
-
-                matches.append({
-                    "league": league,
-                    "home_team": home_team,
-                    "away_team": away_team,
-                    "odd_1": odd_1,
-                    "odd_x": odd_x,
-                    "odd_2": odd_2
-                })
-
-            submitted = st.form_submit_button("Ejecutar Análisis")
-
-        if submitted:
-            st.session_state["input_data"] = {
-                "bankroll": bankroll,
-                "kelly_fraction": kelly_fraction,
-                "matches": matches
-            }
-
-
-    def process_pipeline(self):
-
-        input_data = st.session_state.get("input_data")
-
-        if input_data is None:
-            return
-
-        # ACBE
-        acbe_results = self.acbe_module.process_matches(input_data)
-        st.session_state["acbe_results"] = acbe_results
+if st.button("📊 Calcular Rentabilidad", type="primary"):
+    with st.spinner('Procesando matemáticas...'):
+        # 1. Generamos el sistema
+        df_sistema = genera_sistema(col_base, err_max, matriz_cuotas, apuesta_col, opciones)
         
-        # Poisson ejemplo simple (dummy)
-        poisson_results = []
-
-        for match in input_data["matches"]:
-            lambda_home = 1.4
-            lambda_away = 1.1
-
-            poisson_probs = self.poisson_module.match_probabilities(
-                lambda_home,
-                lambda_away
-            )
-
-            poisson_results.append(poisson_probs)
-
-        st.session_state["poisson_probs"] = poisson_results
-
-        # S73
-        s73_results = self.s73_module.build_s73(acbe_results, input_data)
-        st.session_state["s73_results"] = s73_results
-
-        # Portfolio
-        portfolio_results = self.portfolio_manager.allocate_portfolio(
-            acbe_results=acbe_results,
-            s73_results=s73_results,
-            input_data=input_data,
-            bankroll=input_data["bankroll"],
-            kelly_fraction_user=input_data["kelly_fraction"]
-        )
-
-        st.session_state["portfolio_results"] = portfolio_results
-
-
-        # ----------------------------------------
-        # Confirmación de persistencia
-        # ----------------------------------------
-
-    def render_results(self):
-
-        if "portfolio_results" not in st.session_state:
-            return
-
-        st.header("Resultados Institucionales")
-
-        # ACBE
-        if "acbe_results" in st.session_state:
-
-            results = st.session_state["acbe_results"]
-
-            st.subheader("ACBE")
-
-            for i in range(len(results["probabilities"])):
-
-                st.markdown(f"### Partido {i+1}")
-                st.json(results["probabilities"][i])
-                st.write("Entropía:", round(results["entropy"][i], 4))
-                st.write("Clasificación:", results["classification"][i])
-                st.json(results["ev_matrix"][i])
-                st.divider()
-
-        # S73
-        if "s73_results" in st.session_state:
-
-            st.subheader("Sistema S73")
-
-            for i, col in enumerate(st.session_state["s73_results"]["columns"]):
-
-                st.write(
-                    f"Columna {i+1}: {col['column']} | "
-                    f"P={round(col['joint_probability'],6)} | "
-                    f"Odds={round(col['joint_odds'],3)} | "
-                    f"EV={round(col['joint_ev'],6)}"
-                )
-
-        # Portfolio
-        portfolio = st.session_state["portfolio_results"]
-
-        st.subheader("Portafolio")
-
-        for bet in portfolio["portfolio"]:
-
-            if bet["type"] == "single":
-                st.write(
-                    f"Single M{bet['match_index']} {bet['selection']} | "
-                    f"Stake={round(bet['stake'],2)}"
-                )
-            else:
-                st.write(
-                    f"S73 {bet['column']} | "
-                    f"Stake={round(bet['stake'],2)}"
-                )
-
-        st.write("Exposición total:", round(portfolio["total_exposure"], 2))
-        st.write("ROI esperado:", round(portfolio["roi_expected"], 6))
+        # 2. Calculamos el Costo Total
+        spesa_totale = len(df_sistema) * apuesta_col
         
-        if "poisson_probs" in st.session_state:
-
-            st.subheader("Probabilidades Poisson")
-
-            for i, probs in enumerate(st.session_state["poisson_probs"]):
-                st.write(f"Partido {i+1}")
-                st.json(probs)
-
-    def render_monte_carlo(self):
-
-        if "portfolio_results" not in st.session_state:
-            return
-
-        st.markdown("### 🔬 Simulación Monte Carlo")
-
-        if st.button("Ejecutar Simulación Monte Carlo"):
-
-            portfolio = st.session_state["portfolio_results"]["portfolio"]
-            bankroll = st.session_state["input_data"]["bankroll"]
-
-            mc_engine = MonteCarloEngine(simulations=10000)
-
-            st.session_state["mc_results"] = mc_engine.simulate_portfolio(
-                portfolio,
-                bankroll
+        # 3. Calculamos Ganancia Neta
+        if not df_sistema.empty:
+            df_sistema["Ganancia Neta (€)"] = df_sistema["Ganancia Bruta (€)"] - spesa_totale
+        
+        # Métricas
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Columnas", len(df_sistema))
+        c2.metric("Costo del Sistema", f"{spesa_totale:.2f} €")
+        
+        if not df_sistema.empty:
+            max_neto = df_sistema["Ganancia Neta (€)"].max()
+            c3.metric("Mejor Ganancia Neta", f"{max_neto:.2f} €", delta_color="normal" if max_neto > 0 else "inverse")
+        
+        # TABLA (LIMPIA, SIN QUOTA TOTAL)
+        if not df_sistema.empty:
+            st.dataframe(
+                df_sistema.style.format({
+                    "Ganancia Bruta (€)": "{:.2f} €",
+                    "Ganancia Neta (€)": "{:.2f} €"
+                }),
+                use_container_width=True,
+                height=400,
+                hide_index=True # Ocultamos el índice numérico para ganar más espacio
             )
+        else:
+            st.warning("No se generaron columnas con esa configuración.")
+            
+        st.session_state["ultimo_sistema"] = df_sistema
+        st.session_state["spesa_totale"] = spesa_totale
 
-        if "mc_results" in st.session_state:
+elif "ultimo_sistema" in st.session_state:
+    df = st.session_state["ultimo_sistema"]
+    spesa = st.session_state.get("spesa_totale", 0)
+    
+    st.info(f"Mostrando último cálculo (Costo: {spesa:.2f} €)")
+    st.dataframe(
+        df.style.format({
+            "Ganancia Bruta (€)": "{:.2f} €",
+            "Ganancia Neta (€)": "{:.2f} €"
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
 
-            mc = st.session_state["mc_results"]
+# --- SIMULADOR DE RESULTADOS ---
+st.divider()
+st.subheader("3. Simulador de Resultados Reales")
+st.info("Ingresa los resultados para ver si ganaste dinero real.")
 
-            st.write("ROI Medio:", round(mc["roi_mean"], 4))
-            st.write("Desvío ROI:", round(mc["roi_std"], 4))
-            st.write("Prob ROI positivo:", round(mc["prob_positive"], 4))
-            st.write("Drawdown Medio:", round(mc["max_dd_mean"], 4))
-            st.write("DD 95%:", round(mc["dd_95"], 4))
+res_sim, goles_l, goles_v = [], [], []
+cols_sim = st.columns(num_p)
 
-# ============================================
-# EJECUCIÓN
-# ============================================
+for i in range(num_p):
+    with cols_sim[i]: 
+        st.caption(f"{equipos_local[i]} vs {equipos_visit[i]}")
+        c_gl, c_gv = st.columns(2)
+        gl = c_gl.number_input("L", min_value=0, step=1, key=f"sim_gl_{i}")
+        gv = c_gv.number_input("V", min_value=0, step=1, key=f"sim_gv_{i}")
+        goles_l.append(gl); goles_v.append(gv)
+        
+        if solo_ganador: s_auto = "1" if gl > gv else "2"
+        else: s_auto = "1" if gl > gv else ("2" if gv > gl else "X")
+        res_sim.append(s_auto)
+        
+        color = "🟢" if s_auto == col_base[i] else "🔴"
+        st.markdown(f"**{s_auto}** {color}")
 
-if __name__ == "__main__":
-    app = ACBEApp()
-    app.run()
+# --- BIBLIOTECA DE ESTADÍSTICAS ---
+st.divider()
+st.header("📚 Biblioteca de Equipos")
+
+if st.button("💾 Registrar en Historial"):
+    for i in range(num_p):
+        nom_l = equipos_local[i]
+        if nom_l not in st.session_state["biblioteca"]:
+            st.session_state["biblioteca"][nom_l] = {"pj": 0, "gf": 0, "gc": 0, "wins": 0}
+        
+        st.session_state["biblioteca"][nom_l]["pj"] += 1
+        st.session_state["biblioteca"][nom_l]["gf"] += goles_l[i]
+        st.session_state["biblioteca"][nom_l]["gc"] += goles_v[i]
+        if res_sim[i] == "1": st.session_state["biblioteca"][nom_l]["wins"] += 1
+
+        nom_v = equipos_visit[i]
+        if nom_v not in st.session_state["biblioteca"]:
+            st.session_state["biblioteca"][nom_v] = {"pj": 0, "gf": 0, "gc": 0, "wins": 0}
+        
+        st.session_state["biblioteca"][nom_v]["pj"] += 1
+        st.session_state["biblioteca"][nom_v]["gf"] += goles_v[i]
+        st.session_state["biblioteca"][nom_v]["gc"] += goles_l[i]
+        if res_sim[i] == "2": st.session_state["biblioteca"][nom_v]["wins"] += 1
+    
+    st.success("✅ Historial actualizado.")
+
+if st.session_state["biblioteca"]:
+    lista_stats = []
+    for equipo, stats in st.session_state["biblioteca"].items():
+        prom_gf = stats["gf"] / stats["pj"] if stats["pj"] > 0 else 0
+        lista_stats.append({
+            "Equipo": equipo,
+            "Jugados": stats["pj"],
+            "Goles Favor": stats["gf"],
+            "Goles Contra": stats["gc"],
+            "Prom. Goles": round(prom_gf, 2),
+            "Victorias": stats["wins"]
+        })
+    
+    df_biblio = pd.DataFrame(lista_stats)
+    st.dataframe(df_biblio, use_container_width=True, hide_index=True)
+
+# --- DESCARGA ---
+st.divider()
+st.subheader("💾 Guardar Datos")
+
+col_d1, col_d2 = st.columns([3, 1])
+with col_d1:
+    nombre_archivo = st.text_input("Nombre:", value=f"backup_{datetime.now().strftime('%Y%m%d')}")
+
+datos_export = {
+    "num_p": num_p,
+    "solo_ganador": solo_ganador,
+    "err_max": err_max,
+    "apuesta_col": apuesta_col,
+    "local": equipos_local,
+    "visit": equipos_visit,
+    "competiciones": competiciones,
+    "base": col_base,
+    "cuotas": matriz_cuotas,
+    "biblioteca": st.session_state["biblioteca"], 
+    "fecha_creacion": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+}
+
+json_str = json.dumps(datos_export, indent=4)
+
+with col_d2:
+    st.write("##")
+    st.download_button("⬇️ Descargar JSON", json_str, f"{nombre_archivo}.json", "application/json")
